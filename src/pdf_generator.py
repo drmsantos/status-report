@@ -425,11 +425,14 @@ def _page_resources(report: ClusterReport, st: dict) -> list:
 
     # Pie: pods por namespace
     ns_sorted = sorted(report.namespaces, key=lambda n: n.pod_count, reverse=True)
+    # Oculta namespaces sem pods para não poluir o relatório
+    ns_with_pods = [n for n in ns_sorted if n.pod_count > 0]
+    ns_empty     = [n for n in ns_sorted if n.pod_count == 0]
     pie_data = [
         (n.name[:14], n.pod_count, NS_COLORS[i % len(NS_COLORS)])
-        for i, n in enumerate(ns_sorted[:8]) if n.pod_count > 0
+        for i, n in enumerate(ns_with_pods[:8]) if n.pod_count > 0
     ]
-    other = sum(n.pod_count for n in ns_sorted[8:])
+    other = sum(n.pod_count for n in ns_with_pods[8:])
     if other > 0:
         pie_data.append(("outros", other, "#95A5A6"))
 
@@ -457,7 +460,7 @@ def _page_resources(report: ClusterReport, st: dict) -> list:
     story.extend(_section_header("Namespaces — Detalhado", st))
     headers = ["Namespace","Status","Pods","Running","Pending","Failed","CPU (m)","Mem (MiB)","Idade"]
     data = [headers]
-    for ns in ns_sorted:
+    for ns in ns_with_pods:
         cpu = str(ns.cpu_usage_m) if ns.cpu_usage_m else "N/A"
         mem = str(ns.mem_usage_mib) if ns.mem_usage_mib else "N/A"
         data.append([
@@ -470,6 +473,11 @@ def _page_resources(report: ClusterReport, st: dict) -> list:
             Paragraph(cpu, st["small"]),
             Paragraph(mem, st["small"]),
             Paragraph(ns.age, st["small"]),
+        ])
+    if ns_empty:
+        data.append([
+            Paragraph(f"+ {len(ns_empty)} namespaces sem pods omitidos", st["smallg"]),
+            *[Paragraph("", st["small"]) for _ in range(8)]
         ])
     widths = [r*USABLE for r in [0.24,0.09,0.07,0.08,0.08,0.07,0.09,0.10,0.07]]
     nt = Table(data, colWidths=widths, repeatRows=1)
@@ -634,36 +642,37 @@ def _page_workloads(report: ClusterReport, st: dict) -> list:
 
     if report.cronjobs:
         row_left.extend(_section_header("CronJobs", st))
-        cjh = ["CronJob","Namespace","Schedule","Último","Ativos","Idade"]
+        cjh = ["CronJob","Namespace","Schedule","Último","Idade"]
         cjd = [cjh]
         for cj in report.cronjobs:
             cjd.append([
-                Paragraph(cj.name[:28], st["small"]),
-                Paragraph(cj.namespace, st["small"]),
+                Paragraph(cj.name[:30], st["small"]),
+                Paragraph(cj.namespace[:20], st["small"]),
                 Paragraph(cj.schedule, st["smallg"]),
                 Paragraph(cj.last_schedule, st["smallg"]),
-                Paragraph(str(cj.active), st["small"]),
                 Paragraph(cj.age, st["smallg"]),
             ])
-        wsc = [r*col2 for r in [0.28,0.22,0.18,0.14,0.08,0.08]]
+        wsc = [r*col2 for r in [0.32,0.26,0.20,0.14,0.08]]
         tc = Table(cjd, colWidths=wsc, repeatRows=1)
         tc.setStyle(_tbl_style())
         row_left.append(tc)
 
     if report.jobs:
         row_right.extend(_section_header("Jobs", st))
-        jh = ["Job","Namespace","Completions","Duração","Status","Idade"]
+        jh = ["Job","Namespace","Status","Duração","Idade"]
         jd = [jh]
         for j in report.jobs:
+            # Filtra jobs de teste do status-report
+            if "status-report-test" in j.name:
+                continue
             jd.append([
-                Paragraph(j.name[:26], st["small"]),
-                Paragraph(j.namespace, st["small"]),
-                Paragraph(j.completions, st["small"]),
-                Paragraph(j.duration, st["smallg"]),
+                Paragraph(j.name[:28], st["small"]),
+                Paragraph(j.namespace[:18], st["small"]),
                 _status_para(j.status, st),
+                Paragraph(j.duration, st["smallg"]),
                 Paragraph(j.age, st["smallg"]),
             ])
-        wsj = [r*col2 for r in [0.28,0.22,0.14,0.12,0.14,0.08]]
+        wsj = [r*col2 for r in [0.32,0.24,0.16,0.16,0.08]]
         tj = Table(jd, colWidths=wsj, repeatRows=1)
         tj.setStyle(_tbl_style())
         row_right.append(tj)
@@ -685,8 +694,15 @@ def _page_pods(report: ClusterReport, st: dict) -> list:
     story = [PageBreak()]
     story.extend(_section_header("Pods — Atenção (Falhas / Pending / High Restarts)", st))
 
-    problem = [p for p in report.pods
-               if p.status not in ("Running","Succeeded") or p.restarts >= 5]
+    SYSTEM_NS = {"kube-system","kube-node-lease","kube-public","cattle-system",
+                 "cattle-fleet-system","cattle-fleet-local-system","cattle-capi-system",
+                 "cattle-turtles-system","fleet-default","fleet-local","local","local-path-storage"}
+
+    problem = [p for p in report.pods if (
+        p.status not in ("Running", "Succeeded") or
+        (p.namespace in SYSTEM_NS and p.restarts >= 20) or
+        (p.namespace not in SYSTEM_NS and p.restarts >= 5)
+    )]
     if not problem:
         story.append(Paragraph("✅ Nenhum pod com problemas detectado.", st["normal"]))
     else:

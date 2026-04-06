@@ -92,7 +92,45 @@ def _mem_to_mib(mem_str: str) -> int:
         return 0
 
 
-def _cpu_allocatable_m(cpu_str: str) -> int:
+def _fmt_mem(mem_str: str) -> str:
+    """Formata memória Ki/Mi/Gi para formato legível curto ex: 16Gi, 512Mi."""
+    if not mem_str or mem_str in ("N/A", "?", "<unknown>"):
+        return mem_str or "?"
+    try:
+        mem_str = mem_str.strip()
+        if mem_str.endswith("Ki"):
+            ki = int(mem_str[:-2])
+            if ki >= 1024 * 1024:
+                return f"{ki // (1024*1024)}Gi"
+            if ki >= 1024:
+                return f"{ki // 1024}Mi"
+            return f"{ki}Ki"
+        if mem_str.endswith("Mi"):
+            mi = int(mem_str[:-2])
+            if mi >= 1024:
+                return f"{mi // 1024}Gi"
+            return f"{mi}Mi"
+        if mem_str.endswith("Gi"):
+            return mem_str
+        return mem_str
+    except Exception:
+        return mem_str
+
+
+def _fmt_version(version: str) -> str:
+    """Abrevia versão do kubelet ex: v1.34.4+rke2r1 → v1.34.4"""
+    if not version or version == "?":
+        return version
+    # Remove sufixo +rke2r1, +k3s1, etc
+    return version.split("+")[0]
+
+
+def _fmt_roles(roles_str: str) -> str:
+    """Abrevia roles ex: control-plane,etcd → ctrl,etcd"""
+    return roles_str.replace("control-plane", "ctrl").replace("master", "mstr")
+
+
+
     """Converte CPU allocatable para millicores."""
     try:
         if cpu_str.endswith("m"):
@@ -164,11 +202,14 @@ def collect_nodes(ctx=None) -> list[NodeInfo]:
             mem_use_mib = _mem_to_mib(t.get("mem", "0"))
 
             nodes.append(NodeInfo(
-                name=meta["name"], status=node_status, roles=roles_str,
+                name=meta["name"], status=node_status,
+                roles=_fmt_roles(",".join(roles) or "worker"),
                 age=_age(meta["creationTimestamp"]),
-                version=status.get("nodeInfo", {}).get("kubeletVersion", "?"),
-                cpu_capacity=cap.get("cpu", "?"), mem_capacity=cap.get("memory", "?"),
-                cpu_allocatable=alloc.get("cpu", "?"), mem_allocatable=alloc.get("memory", "?"),
+                version=_fmt_version(status.get("nodeInfo", {}).get("kubeletVersion", "?")),
+                cpu_capacity=cap.get("cpu", "?"),
+                mem_capacity=_fmt_mem(cap.get("memory", "?")),
+                cpu_allocatable=alloc.get("cpu", "?"),
+                mem_allocatable=_fmt_mem(alloc.get("memory", "?")),
                 cpu_usage=t.get("cpu", "N/A"), mem_usage=t.get("mem", "N/A"),
                 cpu_pct=float(t.get("cpu_pct", 0) or 0),
                 mem_pct=float(t.get("mem_pct", 0) or 0),
@@ -370,10 +411,14 @@ def collect_pvcs(ctx=None) -> list[PVCInfo]:
             meta = item["metadata"]
             spec = item.get("spec", {})
             st = item.get("status", {})
+            vol_name = spec.get("volumeName", "?")
+            # Abrevia UUID do volume para não poluir a coluna
+            if vol_name and vol_name.startswith("pvc-") and len(vol_name) > 16:
+                vol_name = vol_name[:15] + "…"
             result.append(PVCInfo(
                 name=meta["name"], namespace=meta.get("namespace", "?"),
                 status=st.get("phase", "?"),
-                volume=spec.get("volumeName", "?"),
+                volume=vol_name,
                 capacity=st.get("capacity", {}).get("storage", "?"),
                 access_modes=",".join(spec.get("accessModes", [])),
                 storage_class=spec.get("storageClassName", "?"),
@@ -507,20 +552,26 @@ def collect_hpas(ctx=None) -> list[HPAInfo]:
     return result
 
 
-def collect_events(ctx=None, limit: int = 60) -> list[EventInfo]:
+def collect_events(ctx=None, limit: int = 60, exclude_namespaces: list = None) -> list[EventInfo]:
     ok, out = _run(["get", "events", "--all-namespaces",
                     "--field-selector", "type=Warning",
                     "--sort-by=.lastTimestamp"], ctx)
     if not ok:
         return []
+
+    # Namespaces a excluir dos eventos (ex: o próprio namespace do status-report)
+    exclude = set(exclude_namespaces or ["status-report"])
+
     result = []
     try:
         items = json.loads(out).get("items", [])
-        # Pega os mais recentes
         for item in items[-limit:]:
             meta = item["metadata"]
+            ns = meta.get("namespace", "?")
+            if ns in exclude:
+                continue
             result.append(EventInfo(
-                namespace=meta.get("namespace", "?"),
+                namespace=ns,
                 type=item.get("type", "?"),
                 reason=item.get("reason", "?"),
                 object=f"{item.get('involvedObject',{}).get('kind','?')}/{item.get('involvedObject',{}).get('name','?')}",
@@ -572,7 +623,15 @@ def build_summary(report: ClusterReport) -> dict:
     failed  = sum(1 for p in pods if p.status in ("Failed", "CrashLoopBackOff", "OOMKilled"))
     crash   = sum(1 for p in pods if p.status == "CrashLoopBackOff")
     oom     = sum(1 for p in pods if p.status == "OOMKilled")
-    high_r  = [p for p in pods if p.restarts >= 5]
+    # Pods com restarts elevados — threshold maior para componentes de sistema
+    SYSTEM_NS = {"kube-system", "kube-node-lease", "kube-public",
+                 "cattle-system", "cattle-fleet-system", "cattle-fleet-local-system",
+                 "cattle-capi-system", "cattle-turtles-system", "fleet-default",
+                 "fleet-local", "local", "local-path-storage"}
+    high_r = [p for p in pods if (
+        (p.namespace in SYSTEM_NS and p.restarts >= 20) or
+        (p.namespace not in SYSTEM_NS and p.restarts >= 5)
+    )]
 
     nodes_ready = sum(1 for n in report.nodes if n.status == "Ready")
     pvcs_bound  = sum(1 for p in report.pvcs if p.status == "Bound")
@@ -658,7 +717,7 @@ def collect_all(cluster_name: str = "default", context: Optional[str] = None) ->
         ("ingresses",    lambda: collect_ingresses(context)),
         ("services",     lambda: collect_services(context)),
         ("hpas",         lambda: collect_hpas(context)),
-        ("events",       lambda: collect_events(context)),
+        ("events",       lambda: collect_events(context, exclude_namespaces=["status-report"])),
     ]
 
     for attr, fn in steps:
