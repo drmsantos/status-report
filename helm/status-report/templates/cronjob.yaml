@@ -1,0 +1,147 @@
+{{/*
+Autor:   Diego Regis M. F. dos Santos
+Email:   diego-f-santos@openlabs.com.br
+Time:    OpenLabs - DevOps | Infra
+Versão:  2.0.0
+Arquivo: helm/status-report/templates/cronjob.yaml
+Desc:    CronJob principal do K8s Status Report
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "status-report.fullname" . }}
+  namespace: {{ include "status-report.namespace" . }}
+  labels:
+    {{- include "status-report.labels" . | nindent 4 }}
+  annotations:
+    description: "Kubernetes Status Report — OpenLabs DevOps"
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  concurrencyPolicy: {{ .Values.cronjob.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: {{ .Values.cronjob.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "status-report.selectorLabels" . | nindent 12 }}
+          annotations:
+            # Forçar restart quando ConfigMap ou Secret mudar
+            checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+            checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        spec:
+          serviceAccountName: {{ include "status-report.serviceAccountName" . }}
+          restartPolicy: {{ .Values.cronjob.restartPolicy }}
+          automountServiceAccountToken: true
+
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.podSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+
+          volumes:
+            # Volume temporário para relatórios gerados
+            - name: reports
+              emptyDir: {}
+            # Volume de cache (histórico)
+            {{- if .Values.persistence.enabled }}
+            - name: cache
+              persistentVolumeClaim:
+                claimName: {{ include "status-report.fullname" . }}-cache
+            {{- else }}
+            - name: cache
+              emptyDir: {}
+            {{- end }}
+            {{- with .Values.extraVolumes }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+
+          containers:
+            - name: status-report
+              image: {{ include "status-report.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+              {{- with .Values.securityContext }}
+              securityContext:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+
+              {{- with .Values.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+
+              # Argumentos passados ao main.py
+              args:
+                {{- if .Values.config.watchMode }}
+                - "--watch"
+                - "--interval"
+                - {{ .Values.config.watchInterval | quote }}
+                {{- end }}
+                {{- if .Values.config.alertOnly }}
+                - "--alert-only"
+                {{- end }}
+
+              # Variáveis de ambiente — ConfigMap
+              envFrom:
+                - configMapRef:
+                    name: {{ include "status-report.fullname" . }}-config
+
+              # Variáveis sensíveis — Secrets
+              env:
+                - name: SMTP_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "status-report.smtpSecretName" . }}
+                      key: smtp-user
+                - name: SMTP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "status-report.smtpSecretName" . }}
+                      key: smtp-password
+                - name: TEAMS_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "status-report.teamsSecretName" . }}
+                      key: teams-webhook-url
+                      optional: true
+                - name: SLACK_WEBHOOK_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "status-report.teamsSecretName" . }}
+                      key: slack-webhook-url
+                      optional: true
+                {{- with .Values.extraEnv }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+
+              volumeMounts:
+                - name: reports
+                  mountPath: {{ .Values.config.outputDir }}
+                - name: cache
+                  mountPath: {{ .Values.config.cacheDir }}
+                {{- with .Values.extraVolumeMounts }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}

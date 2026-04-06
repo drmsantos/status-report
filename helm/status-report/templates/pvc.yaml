@@ -1,0 +1,25 @@
+{{/*
+Autor:   Diego Regis M. F. dos Santos
+Email:   diego-f-santos@openlabs.com.br
+Time:    OpenLabs - DevOps | Infra
+Versão:  2.0.0
+Arquivo: helm/status-report/templates/pvc.yaml
+*/}}
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "status-report.fullname" . }}-cache
+  namespace: {{ include "status-report.namespace" . }}
+  labels:
+    {{- include "status-report.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass }}
+  {{- end }}
+{{- end }}

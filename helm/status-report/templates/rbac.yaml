@@ -1,0 +1,98 @@
+{{/*
+Autor:   Diego Regis M. F. dos Santos
+Email:   diego-f-santos@openlabs.com.br
+Time:    OpenLabs - DevOps | Infra
+Versão:  2.0.0
+Arquivo: helm/status-report/templates/rbac.yaml
+*/}}
+{{- if .Values.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "status-report.fullname" . }}
+  labels:
+    {{- include "status-report.labels" . | nindent 4 }}
+rules:
+  # Nodes — necessário para coleta de nodes e kubectl top nodes
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/stats", "nodes/metrics"]
+    verbs: ["get", "list", "watch"]
+
+  # Pods — coleta e kubectl top pods
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+
+  # Namespaces
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+
+  # Services, Endpoints
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+
+  # PersistentVolumes e PVCs
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+
+  # Events (Warning events)
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+  # Deployments, ReplicaSets
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+
+  # Jobs e CronJobs
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+
+  # Ingresses
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "ingressclasses"]
+    verbs: ["get", "list", "watch"]
+
+  # HPA
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+
+  # Metrics API (kubectl top)
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list"]
+
+  # OpenShift Routes (se aplicável)
+  - apiGroups: ["route.openshift.io"]
+    resources: ["routes"]
+    verbs: ["get", "list", "watch"]
+
+  # ConfigMaps e Secrets (somente leitura — para diagnóstico)
+  # Remova se não quiser leitura de Secrets
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "status-report.fullname" . }}
+  labels:
+    {{- include "status-report.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "status-report.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "status-report.serviceAccountName" . }}
+    namespace: {{ include "status-report.namespace" . }}
+{{- end }}

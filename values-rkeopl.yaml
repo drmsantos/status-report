@@ -1,0 +1,45 @@
+# =============================================================================
+# Autor:   Diego Regis M. F. dos Santos
+# Email:   diego-f-santos@openlabs.com.br
+# Time:    OpenLabs - DevOps | Infra
+# Versão:  2.0.0
+# Arquivo: values-rkeopl.yaml
+# Desc:    Values para o cluster RKE2 (rkeopl) — Rancher
+# =============================================================================
+
+cronjob:
+  schedule: "0 7 * * 1-5"    # seg-sex às 07h
+
+config:
+  clusters: "rkeopl"
+  contexts: ""                # usa in-cluster (ServiceAccount)
+
+smtp:
+  host:      "smtp.office365.com"
+  port:      "587"
+  fromName:  "OpenLabs DevOps — rkeopl"
+  fromEmail: "noreply@openlabs.com.br"
+  # Usar existingSecret em produção:
+  # existingSecret: "status-report-smtp-secret"
+
+email:
+  to: "ops@openlabs.com.br,diego-f-santos@openlabs.com.br"
+
+persistence:
+  enabled: true
+  storageClass: "longhorn-1r"
+  size: 1Gi
+
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+
+resources:
+  requests:
+    cpu:    150m
+    memory: 256Mi
+  limits:
+    cpu:    500m
+    memory: 512Mi

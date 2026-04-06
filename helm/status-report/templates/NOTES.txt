@@ -1,0 +1,59 @@
+╔══════════════════════════════════════════════════════════════════╗
+║         K8s Status Report — OpenLabs DevOps — v{{ .Chart.AppVersion }}              ║
+╚══════════════════════════════════════════════════════════════════╝
+
+✅ Release "{{ .Release.Name }}" instalado com sucesso no namespace "{{ include "k8s-status-report.namespace" . }}"!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 AGENDAMENTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  CronJob:   {{ .Release.Name }}/{{ include "k8s-status-report.fullname" . }}
+  Schedule:  {{ .Values.cronjob.schedule }}
+  Cluster:   {{ .Values.config.clusters }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 EXECUÇÃO MANUAL (teste imediato)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  kubectl create job --from=cronjob/{{ include "k8s-status-report.fullname" . }} \
+    {{ include "k8s-status-report.fullname" . }}-manual-$(date +%s) \
+    -n {{ include "k8s-status-report.namespace" . }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 ACOMPANHAR LOGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  # Último job
+  kubectl logs -l app.kubernetes.io/name={{ include "k8s-status-report.name" . }} \
+    -n {{ include "k8s-status-report.namespace" . }} --tail=100
+
+  # Watch em tempo real
+  kubectl logs -l app.kubernetes.io/name={{ include "k8s-status-report.name" . }} \
+    -n {{ include "k8s-status-report.namespace" . }} -f
+
+  # Histórico de jobs
+  kubectl get jobs -n {{ include "k8s-status-report.namespace" . }} \
+    -l app.kubernetes.io/instance={{ .Release.Name }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔑 CREDENCIAIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{- if .Values.smtp.existingSecret }}
+  SMTP Secret:    {{ .Values.smtp.existingSecret }} (existingSecret ✓)
+{{- else }}
+  SMTP Secret:    {{ include "k8s-status-report.fullname" . }}-smtp (gerado pelo chart)
+  ⚠  Recomendado: use --set smtp.existingSecret=<nome> em produção
+     e crie o Secret manualmente com kubectl create secret generic.
+{{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 ATUALIZAR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  helm upgrade {{ .Release.Name }} ./helm/k8s-status-report \
+    -f values-{{ .Values.config.clusters }}.yaml \
+    -n {{ include "k8s-status-report.namespace" . }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  OpenLabs — DevOps | Infra | diego-f-santos@openlabs.com.br
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

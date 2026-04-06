@@ -1,0 +1,37 @@
+# =============================================================================
+# Autor:   Diego Regis M. F. dos Santos
+# Email:   diego-f-santos@openlabs.com.br
+# Time:    OpenLabs - DevOps | Infra
+# Versão:  2.0.0
+# Arquivo: values-rancher-local.yaml
+# Desc:    Values para o cluster Rancher pessoal (rancher.drmsantos.local)
+# =============================================================================
+
+cronjob:
+  schedule: "0 8 * * *"    # diário às 08h (inclusive fins de semana)
+
+config:
+  clusters: "rancher-local"
+  contexts: ""
+
+smtp:
+  host:      "smtp.office365.com"
+  port:      "587"
+  fromName:  "DrMSantos Lab"
+  fromEmail: "noreply@drmsantos.local"
+
+email:
+  to: "diego@drmsantos.local"
+
+persistence:
+  enabled: true
+  storageClass: "local-path"
+  size: 512Mi
+
+resources:
+  requests:
+    cpu:    100m
+    memory: 192Mi
+  limits:
+    cpu:    300m
+    memory: 384Mi

@@ -1,0 +1,57 @@
+{{/*
+Autor:   Diego Regis M. F. dos Santos
+Email:   diego-f-santos@openlabs.com.br
+Time:    OpenLabs - DevOps | Infra
+Versão:  2.0.0
+Arquivo: helm/status-report/templates/scc.yaml
+Desc:    SecurityContextConstraints para OpenShift
+*/}}
+{{- if .Values.openshift.createSCC }}
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: {{ .Values.openshift.sccName }}
+  labels:
+    {{- include "status-report.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/description: >
+      SCC para o status-report — permite runAsUser 1000 e
+      leitura de recursos do cluster sem privilégios root.
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegeEscalation: false
+allowPrivilegedContainer: false
+allowedCapabilities: []
+defaultAddCapabilities: []
+requiredDropCapabilities:
+  - ALL
+fsGroup:
+  type: MustRunAs
+  ranges:
+    - min: 1000
+      max: 1000
+runAsUser:
+  type: MustRunAsRange
+  uidRangeMin: 1000
+  uidRangeMax: 1000
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: MustRunAs
+  ranges:
+    - min: 1000
+      max: 1000
+users:
+  - system:serviceaccount:{{ include "status-report.namespace" . }}:{{ include "status-report.serviceAccountName" . }}
+groups: []
+volumes:
+  - configMap
+  - secret
+  - persistentVolumeClaim
+  - emptyDir
+  - projected
+  - downwardAPI
+{{- end }}

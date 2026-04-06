@@ -1,0 +1,32 @@
+# =============================================================================
+# Autor:   Diego Regis M. F. dos Santos
+# Email:   diego-f-santos@openlabs.com.br
+# Time:    OpenLabs - DevOps | Infra
+# Versão:  2.0.0
+# Arquivo: helm/status-report/Chart.yaml
+# =============================================================================
+
+apiVersion: v2
+name: status-report
+description: >
+  Kubernetes Status Report — coleta dados do cluster, gera PDF profissional
+  e envia por e-mail (Office 365), Teams e Slack via CronJob nativo.
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+
+keywords:
+  - kubernetes
+  - monitoring
+  - report
+  - cronjob
+  - openshift
+  - rancher
+
+home: https://github.com/drmsantos/status-report
+sources:
+  - https://github.com/drmsantos/status-report
+
+maintainers:
+  - name: Diego Regis M. F. dos Santos
+    email: diego-f-santos@openlabs.com.br

@@ -1,0 +1,161 @@
+# =============================================================================
+# Autor:   Diego Regis M. F. dos Santos
+# Email:   diego-f-santos@openlabs.com.br
+# Time:    OpenLabs - DevOps | Infra
+# Versão:  2.0.0
+# Arquivo: helm/status-report/values.yaml
+# =============================================================================
+
+# ── Imagem ────────────────────────────────────────────────────────────────────
+image:
+  repository: ghcr.io/drmsantos/status-report
+  tag: ""            # default: appVersion do Chart.yaml
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+# - name: ghcr-pull-secret
+
+# ── Agendamento ───────────────────────────────────────────────────────────────
+cronjob:
+  # Cron schedule — exemplos:
+  #   "0 7 * * 1-5"   = seg-sex às 07h
+  #   "0 7,19 * * *"  = duas vezes ao dia (07h e 19h)
+  #   "0 */6 * * *"   = a cada 6h
+  schedule: "0 7 * * 1-5"
+
+  # Política de concorrência: Forbid garante que só um job roda por vez
+  concurrencyPolicy: Forbid
+
+  # Quantos jobs concluídos/falhados manter no histórico
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+  # Timeout em segundos (10 min default)
+  activeDeadlineSeconds: 600
+
+  # Restart policy do Pod
+  restartPolicy: OnFailure
+
+# ── Clusters ──────────────────────────────────────────────────────────────────
+config:
+  # Um ou mais clusters separados por vírgula
+  # O pod usa o kubeconfig montado via ServiceAccount + in-cluster config
+  # Para múltiplos clusters externos, use extraVolumes + KUBECONFIG env
+  clusters: "default"
+  contexts: ""
+
+  # Modo watch (se true, ignora o CronJob e roda o watch em loop no pod)
+  watchMode: false
+  watchInterval: 15   # minutos
+
+  # Notificar apenas se houver alertas (útil para watch)
+  alertOnly: false
+
+  # Diretórios de dados (dentro do pod)
+  outputDir: /data/reports
+  cacheDir:  /data/cache
+
+# ── SMTP / Office 365 ─────────────────────────────────────────────────────────
+smtp:
+  host:     "smtp.office365.com"
+  port:     "587"
+  # Credenciais — use existingSecret para produção
+  user:     ""
+  password: ""
+  fromName: "OpenLabs DevOps"
+  fromEmail: ""
+
+  # Alternativa: referenciar Secret existente
+  # O Secret deve ter as keys: smtp-user, smtp-password
+  existingSecret: ""
+
+# ── Destinatários ─────────────────────────────────────────────────────────────
+email:
+  to:      ""   # "ops@openlabs.com.br,gestor@openlabs.com.br"
+  cc:      ""
+  bcc:     ""
+  replyTo: ""
+
+# ── Teams / Slack ─────────────────────────────────────────────────────────────
+teams:
+  webhookUrl: ""
+  # Alternativa: existingSecret com key teams-webhook-url
+  existingSecret: ""
+
+slack:
+  webhookUrl: ""
+  channel:    ""
+  existingSecret: ""
+
+# ── Storage persistente (cache histórico) ─────────────────────────────────────
+persistence:
+  enabled: false
+  storageClass: ""   # "longhorn", "longhorn-1r", "nfs-sc"
+  accessMode: ReadWriteOnce
+  size: 1Gi
+  # mountPath deve coincidir com config.cacheDir
+  mountPath: /data/cache
+
+# ── RBAC ─────────────────────────────────────────────────────────────────────
+rbac:
+  create: true
+  # Permissões necessárias para leitura de recursos do cluster
+  # ClusterRole para leitura de nodes e recursos cross-namespace
+  clusterRole: true
+
+serviceAccount:
+  create: true
+  name: ""   # gerado automaticamente se vazio
+  annotations: {}
+  # OpenShift — se precisar de SCC privilegiada:
+  # openshift.io/scc: anyuid
+
+# ── OpenShift ────────────────────────────────────────────────────────────────
+openshift:
+  # Cria SecurityContextConstraints para o ServiceAccount
+  createSCC: false
+  sccName: "status-report-scc"
+
+# ── Resources do Pod ──────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu:    100m
+    memory: 256Mi
+  limits:
+    cpu:    500m
+    memory: 512Mi
+
+# ── Security Context ──────────────────────────────────────────────────────────
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false   # false: reportlab precisa escrever tmp
+  capabilities:
+    drop: [ALL]
+
+# ── Node scheduling ───────────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ── Volumes extras (ex: kubeconfig externo para multi-cluster) ───────────────
+extraVolumes: []
+# - name: kubeconfig-ext
+#   secret:
+#     secretName: kubeconfig-external-clusters
+
+extraVolumeMounts: []
+# - name: kubeconfig-ext
+#   mountPath: /root/.kube/config-external
+#   subPath: config
+
+extraEnv: []
+# - name: KUBECONFIG
+#   value: /root/.kube/config-external
+
+# ── Namespace ─────────────────────────────────────────────────────────────────
+namespaceOverride: ""

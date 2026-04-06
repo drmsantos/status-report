@@ -1,0 +1,37 @@
+{{/*
+Autor:   Diego Regis M. F. dos Santos
+Email:   diego-f-santos@openlabs.com.br
+Time:    OpenLabs - DevOps | Infra
+Versão:  2.0.0
+Arquivo: helm/status-report/templates/configmap.yaml
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "status-report.fullname" . }}-config
+  namespace: {{ include "status-report.namespace" . }}
+  labels:
+    {{- include "status-report.labels" . | nindent 4 }}
+data:
+  # Clusters e contextos
+  K8S_CLUSTERS:  {{ .Values.config.clusters | quote }}
+  K8S_CONTEXTS:  {{ .Values.config.contexts | quote }}
+
+  # Diretórios
+  OUTPUT_DIR: {{ .Values.config.outputDir | quote }}
+  CACHE_DIR:  {{ .Values.config.cacheDir  | quote }}
+
+  # SMTP configuração não-sensível
+  SMTP_HOST:      {{ .Values.smtp.host      | quote }}
+  SMTP_PORT:      {{ .Values.smtp.port      | quote }}
+  SMTP_FROM_NAME: {{ .Values.smtp.fromName  | quote }}
+  SMTP_FROM_EMAIL: {{ .Values.smtp.fromEmail | default .Values.smtp.user | quote }}
+
+  # Destinatários
+  EMAIL_TO:       {{ .Values.email.to      | quote }}
+  EMAIL_CC:       {{ .Values.email.cc      | quote }}
+  EMAIL_BCC:      {{ .Values.email.bcc     | quote }}
+  EMAIL_REPLY_TO: {{ .Values.email.replyTo | quote }}
+
+  # Slack channel (não é sensível)
+  SLACK_CHANNEL:  {{ .Values.slack.channel | quote }}

@@ -1,0 +1,58 @@
+# =============================================================================
+# Autor:   Diego Regis M. F. dos Santos
+# Email:   diego-f-santos@openlabs.com.br
+# Time:    OpenLabs - DevOps | Infra
+# Versão:  2.0.0
+# Arquivo: values-openshift.yaml
+# Desc:    Values para OpenShift 4.x (api.openshift.openlabs.local)
+# =============================================================================
+
+cronjob:
+  schedule: "0 7 * * 1-5"
+
+config:
+  clusters: "openshift"
+  contexts: ""    # in-cluster ServiceAccount
+
+smtp:
+  host:      "smtp.office365.com"
+  port:      "587"
+  fromName:  "OpenLabs DevOps — OCP"
+  fromEmail: "noreply@openlabs.com.br"
+
+email:
+  to: "ops@openlabs.com.br,diego-f-santos@openlabs.com.br"
+
+# OpenShift: habilita SCC e desativa podSecurityContext padrão
+# (OCP gerencia o UID via namespace annotations)
+openshift:
+  createSCC: true
+  sccName:   "status-report-scc"
+
+# OCP não usa fsGroup da mesma forma — limpar para evitar conflito com SCC
+podSecurityContext: {}
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+# ServiceAccount com annotation para SCC
+serviceAccount:
+  create: true
+  annotations:
+    # Permite ao OCP vincular o SA ao SCC correto
+    openshift.io/scc: "status-report-scc"
+
+persistence:
+  enabled: true
+  storageClass: "nfs-sc"    # StorageClass do seu OCP
+  size: 1Gi
+
+resources:
+  requests:
+    cpu:    150m
+    memory: 256Mi
+  limits:
+    cpu:    500m
+    memory: 512Mi

@@ -1,0 +1,57 @@
+# =============================================================================
+# Autor:   Diego Regis M. F. dos Santos
+# Email:   diego-f-santos@openlabs.com.br
+# Time:    OpenLabs - DevOps | Infra
+# Versão:  2.0.0
+# Arquivo: .gitignore
+# =============================================================================
+
+# Credenciais — NUNCA commitar
+.env
+*.env
+secrets/
+kubeconfig*
+*kubeconfig*
+
+# Relatórios gerados
+reports/
+*.pdf
+
+# Cache de snapshots
+cache/
+*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+
+# Docker
+.dockerignore
+
+# Helm
+*.tgz
+dist/
+charts/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+k8s_report.log
