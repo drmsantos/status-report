@@ -1,32 +1,18 @@
-╔══════════════════════════════════════════════════════════════════╗
-║         K8s Status Report — OpenLabs DevOps — v{{ .Chart.AppVersion }}
-╚══════════════════════════════════════════════════════════════════╝
+K8s Status Report v{{ .Chart.AppVersion }} - OpenLabs DevOps
 
-✅ Release "{{ .Release.Name }}" instalado com sucesso no namespace "{{ include "status-report.namespace" . }}"!
+Release "{{ .Release.Name }}" instalado no namespace "{{ include "status-report.namespace" . }}"
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📅 AGENDAMENTO
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  CronJob:   {{ .Release.Name }}/{{ include "status-report.fullname" . }}
-  Schedule:  {{ .Values.cronjob.schedule }}
-  Cluster:   {{ .Values.config.clusters }}
+CronJob  : {{ include "status-report.fullname" . }}
+Schedule : {{ .Values.cronjob.schedule }}
+Cluster  : {{ .Values.config.clusters }}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 EXECUÇÃO MANUAL
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  kubectl create job \
-    --from=cronjob/{{ include "status-report.fullname" . }} \
+Execucao manual:
+  kubectl create job --from=cronjob/{{ include "status-report.fullname" . }} \
     {{ include "status-report.fullname" . }}-manual \
     -n {{ include "status-report.namespace" . }}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 LOGS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+Logs:
   kubectl logs -l app.kubernetes.io/name={{ include "status-report.name" . }} \
     -n {{ include "status-report.namespace" . }} -f
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  OpenLabs — DevOps | Infra | diego-f-santos@openlabs.com.br
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OpenLabs DevOps | diego-f-santos@openlabs.com.br
