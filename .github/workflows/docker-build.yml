@@ -1,36 +1,12 @@
-# =============================================================================
-# Autor:   Diego Regis M. F. dos Santos
-# Email:   diego-f-santos@openlabs.com.br
-# Time:    OpenLabs - DevOps | Infra
-# Versão:  2.0.0
-# Arquivo: .github/workflows/docker-build.yml
-# Desc:    CI/CD — Build e push da imagem para ghcr.io
-# =============================================================================
-
 name: Build & Push Docker Image
 
 on:
   push:
     branches: [main]
     tags:     ['v*.*.*']
-    paths:
-      - 'src/**'
-      - 'Dockerfile'
-      - 'helm/**'
-      - '.github/workflows/docker-build.yml'
   pull_request:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'Dockerfile'
-      - 'helm/**'
   workflow_dispatch:
-    inputs:
-      push_image:
-        description: 'Push image to registry?'
-        required: false
-        default: 'true'
-        type: boolean
 
 env:
   REGISTRY:   ghcr.io
@@ -43,21 +19,10 @@ jobs:
     permissions:
       contents: read
       packages: write
-
     steps:
-      # ── Checkout ──────────────────────────────────────────────────────────
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # ── Setup QEMU (multi-arch) ───────────────────────────────────────────
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      # ── Setup Buildx ──────────────────────────────────────────────────────
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ── Login GHCR ────────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
       - name: Login to GitHub Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -65,57 +30,30 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      # ── Gera tags e labels automáticos ────────────────────────────────────
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            # tag exata quando for push de tag (v2.1.0 → 2.1.0 + 2.1 + 2 + latest)
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            # branch main → tag 'edge'
             type=edge,branch=main
-            # SHA curto em todo push
             type=sha,prefix=sha-,format=short
-          labels: |
-            org.opencontainers.image.title=status-report
-            org.opencontainers.image.description=Kubernetes Status Report — OpenLabs DevOps
-            org.opencontainers.image.vendor=OpenLabs
-            maintainer=diego-f-santos@openlabs.com.br
-
-      # ── Build + Push ──────────────────────────────────────────────────────
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
-          file:    ./Dockerfile
+          file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_image != 'false') }}
-          tags:   ${{ steps.meta.outputs.tags }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to:   type=gha,mode=max
+          cache-to: type=gha,mode=max
           build-args: |
             KUBECTL_VERSION=v1.29.3
 
-      # ── Sumário ───────────────────────────────────────────────────────────
-      - name: Image digest
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "### 🐳 Image pushed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Registry:** \`ghcr.io/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
-          echo '${{ steps.meta.outputs.tags }}' | tr ',' '\n' | while read tag; do
-            echo "- \`$tag\`" >> $GITHUB_STEP_SUMMARY
-          done
-
-  # ── Helm lint ─────────────────────────────────────────────────────────────
   helm-lint:
     name: Helm Lint
     runs-on: ubuntu-latest
@@ -127,9 +65,8 @@ jobs:
           version: v3.14.3
       - name: Helm lint
         run: helm lint helm/status-report
-      - name: Helm template (dry-run)
+      - name: Helm template dry-run
         run: |
           helm template status-report helm/status-report \
             --set config.clusters="rkeopl" \
-            --set smtp.host="smtp.office365.com" \
             --debug > /dev/null
