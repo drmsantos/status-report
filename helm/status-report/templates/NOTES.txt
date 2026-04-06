@@ -1,5 +1,5 @@
 ╔══════════════════════════════════════════════════════════════════╗
-║         K8s Status Report — OpenLabs DevOps — v{{ .Chart.AppVersion }}              ║
+║         K8s Status Report — OpenLabs DevOps — v{{ .Chart.AppVersion }}
 ╚══════════════════════════════════════════════════════════════════╝
 
 ✅ Release "{{ .Release.Name }}" instalado com sucesso no namespace "{{ include "status-report.namespace" . }}"!
@@ -12,47 +12,20 @@
   Cluster:   {{ .Values.config.clusters }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🚀 EXECUÇÃO MANUAL (teste imediato)
+🚀 EXECUÇÃO MANUAL
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  kubectl create job --from=cronjob/{{ include "status-report.fullname" . }} \
-    {{ include "status-report.fullname" . }}-manual-$(date +%s) \
+  kubectl create job \
+    --from=cronjob/{{ include "status-report.fullname" . }} \
+    {{ include "status-report.fullname" . }}-manual \
     -n {{ include "status-report.namespace" . }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 ACOMPANHAR LOGS
+📋 LOGS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  # Último job
-  kubectl logs -l app.kubernetes.io/name={{ include "status-report.name" . }} \
-    -n {{ include "status-report.namespace" . }} --tail=100
-
-  # Watch em tempo real
   kubectl logs -l app.kubernetes.io/name={{ include "status-report.name" . }} \
     -n {{ include "status-report.namespace" . }} -f
-
-  # Histórico de jobs
-  kubectl get jobs -n {{ include "status-report.namespace" . }} \
-    -l app.kubernetes.io/instance={{ .Release.Name }}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔑 CREDENCIAIS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-{{- if .Values.smtp.existingSecret }}
-  SMTP Secret:    {{ .Values.smtp.existingSecret }} (existingSecret ✓)
-{{- else }}
-  SMTP Secret:    {{ include "status-report.fullname" . }}-smtp (gerado pelo chart)
-  ⚠  Recomendado: use --set smtp.existingSecret=<nome> em produção
-     e crie o Secret manualmente com kubectl create secret generic.
-{{- end }}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📦 ATUALIZAR
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-  helm upgrade {{ .Release.Name }} ./helm/status-report \
-    -f values-{{ .Values.config.clusters }}.yaml \
-    -n {{ include "status-report.namespace" . }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   OpenLabs — DevOps | Infra | diego-f-santos@openlabs.com.br
