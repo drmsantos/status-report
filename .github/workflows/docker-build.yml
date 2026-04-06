@@ -16,12 +16,14 @@ on:
     paths:
       - 'src/**'
       - 'Dockerfile'
+      - 'helm/**'
       - '.github/workflows/docker-build.yml'
   pull_request:
     branches: [main]
     paths:
       - 'src/**'
       - 'Dockerfile'
+      - 'helm/**'
   workflow_dispatch:
     inputs:
       push_image:
