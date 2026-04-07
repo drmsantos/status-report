@@ -1,0 +1,148 @@
+# =============================================================================
+# Autor:   Diego Regis M. F. dos Santos
+# Email:   diego-f-santos@openlabs.com.br
+# Time:    OpenLabs - DevOps | Infra
+# Versão:  1.0.0
+# Arquivo: values/values-<CLIENTE>.yaml
+# Desc:    Template de configuração por cliente — K8s Status Report
+#
+# Como usar:
+#   1. Copie este arquivo: cp values-template.yaml values/values-clienteX.yaml
+#   2. Preencha os campos marcados com <PREENCHER>
+#   3. Instale: helm upgrade --install status-report-clienteX ./helm/status-report
+#               -n status-report-clienteX -f values/values-clienteX.yaml
+#
+# Ou simplesmente rode: bash install.sh  (interativo, detecta tudo sozinho)
+# =============================================================================
+
+image:
+  repository: ghcr.io/drmsantos/status-report
+  tag: ""          # vazio = usa appVersion do Chart.yaml (recomendado)
+  pullPolicy: IfNotPresent
+
+# ── Agendamento ────────────────────────────────────────────────────────────────
+cronjob:
+  schedule: "0 7 * * 1-5"   # seg-sex às 07h — ajuste por fuso do cliente
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  activeDeadlineSeconds: 600
+  restartPolicy: OnFailure
+
+# ── Clusters ──────────────────────────────────────────────────────────────────
+# Deixe clusters e contexts vazios para auto-discovery via kubeconfig.
+# Preencha manualmente apenas se quiser sobrescrever o auto-discovery.
+#
+# Exemplo manual:
+#   clusters: "rkeopl,openshift-hml"
+#   contexts: "ctx-rkeopl,ctx-ocp"
+config:
+  clusters:  ""    # vazio = auto-discovery
+  contexts:  ""
+  outputDir: /data/reports
+  cacheDir:  /data/cache
+
+# ── SMTP ──────────────────────────────────────────────────────────────────────
+smtp:
+  host:      "smtp.office365.com"   # <PREENCHER> ou manter Office 365
+  port:      "587"
+  user:      ""                     # <PREENCHER> e-mail de envio
+  password:  ""                     # <PREENCHER> usar existingSecret em prod
+  fromName:  "K8s Status Report"
+  fromEmail: ""                     # padrão: igual ao user
+
+  # Produção: referencie um Secret já existente em vez de colocar senha aqui
+  # existingSecret: "meu-secret-smtp"   # deve ter keys smtp-user e smtp-password
+
+# ── Destinatários ─────────────────────────────────────────────────────────────
+email:
+  to:      ""    # <PREENCHER> "ops@cliente.com,gestor@cliente.com"
+  cc:      ""
+  bcc:     ""
+  replyTo: ""
+
+# ── Notificações Teams / Slack ────────────────────────────────────────────────
+teams:
+  webhookUrl: ""   # <PREENCHER> ou deixar vazio e usar configure-webhooks.sh
+  # existingSecret: "status-report-webhooks"  # se preferir usar Secret
+
+slack:
+  webhookUrl: ""
+  channel:    ""
+
+# ── Cache histórico (health trend, sparkline) ─────────────────────────────────
+# Sem persistência o trend não aparece entre execuções.
+# Para RKE2/Rancher: longhorn ou local-path
+# Para OpenShift:    ocs-storagecluster-ceph-rbd ou nfs-sc
+# Para testes:       deixe enabled: false
+persistence:
+  enabled:      true
+  storageClass: ""    # <PREENCHER> ex: longhorn, longhorn-1r, nfs-sc
+  accessMode:   ReadWriteOnce
+  size:         200Mi
+  mountPath:    /data/cache
+
+# ── Multi-cluster / kubeconfig externo ────────────────────────────────────────
+# Para acessar clusters externos (ex: OpenShift de outro tenant):
+#   1. Crie o Secret: kubectl create secret generic status-report-kubeconfig
+#                       --from-file=config=/caminho/do/kubeconfig -n <namespace>
+#   2. Descomente as seções abaixo
+#
+# extraVolumes:
+#   - name: kubeconfig-ext
+#     secret:
+#       secretName: status-report-kubeconfig
+#
+# extraVolumeMounts:
+#   - name: kubeconfig-ext
+#     mountPath: /kubeconfig
+#     readOnly: true
+#
+# extraEnv:
+#   - name: KUBECONFIG
+#     value: /kubeconfig/config
+#
+# Clusters a excluir do auto-discovery (mesmo que estejam no kubeconfig):
+#   - name: EXCLUDE_CLUSTERS
+#     value: "cluster-teste,cluster-dev"
+extraVolumes:      []
+extraVolumeMounts: []
+extraEnv:          []
+
+# ── OpenShift ─────────────────────────────────────────────────────────────────
+# Necessário na maioria dos ambientes OCP para permitir runAsUser: 1000
+openshift:
+  createSCC: false   # mude para true se plataforma for OpenShift
+
+# ── RBAC ──────────────────────────────────────────────────────────────────────
+rbac:
+  create:      true
+  clusterRole: true   # necessário para leitura de nodes e recursos cross-ns
+
+serviceAccount:
+  create: true
+  name:   ""
+
+# ── Recursos ──────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu:    100m
+    memory: 256Mi
+  limits:
+    cpu:    500m
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser:    1000
+  fsGroup:      1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem:   false
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations:  []
+affinity:     {}
