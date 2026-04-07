@@ -419,12 +419,8 @@ def send_teams(report: ClusterReport, webhook_url: str, pdf_path: str = "") -> b
     if not webhook_url:
         return False
     try:
-        if _is_power_automate(webhook_url):
-            payload = _teams_pa_payload(report, pdf_path=pdf_path)
-            logger.debug("Teams: usando payload Power Automate")
-        else:
-            payload = _teams_card(report)
-            logger.debug("Teams: usando Adaptive Card (connector nativo)")
+        payload = _teams_card(report)
+        logger.debug("Teams: usando Adaptive Card")
         r = requests.post(webhook_url, json=payload, timeout=15)
         if r.status_code in (200, 202):
             logger.info("Teams: notificação enviada")
