@@ -45,6 +45,7 @@ class PodInfo:
     mem_usage: str = "N/A"
     cpu_millicores: int = 0
     mem_mib: int = 0
+    last_restart_ago: str = 'N/A'
 
 
 @dataclass

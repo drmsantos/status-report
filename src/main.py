@@ -3,9 +3,12 @@
 # Autor:   Diego Regis M. F. dos Santos
 # Email:   diego-f-santos@openlabs.com.br
 # Time:    OpenLabs - DevOps | Infra
-# Versão:  2.0.0
+# Versão:  2.1.0
 # Arquivo: main.py
 # Desc:    Entrypoint v2 — Multi-cluster, Watch mode, Cache histórico
+# Changelog v2.1.0:
+#   - previous_summary passado para collect_all para health trend
+#   - PVC Pending alert integrado no fluxo de notificações
 # =============================================================================
 
 import os
@@ -85,6 +88,9 @@ Variáveis de ambiente (.env):
   K8S_CONTEXTS          ex: ctx-rkeopl,ctx-ocp (mesma ordem)
   OUTPUT_DIR            ./reports
   CACHE_DIR             ./cache
+  RESTART_THRESHOLD_APP ex: 5 (default)
+  RESTART_THRESHOLD_SYS ex: 20 (default)
+  PVC_PENDING_ALERT_DAYS ex: 1 (default)
         """
     )
     p.add_argument("--cluster",    default=None, help="Nome(s) do cluster separados por vírgula")
@@ -101,7 +107,6 @@ Variáveis de ambiente (.env):
 
 
 def _parse_clusters(args) -> list[tuple[str, str | None]]:
-    """Retorna lista de (cluster_name, context)."""
     clusters_env = os.getenv("K8S_CLUSTERS", "")
     contexts_env = os.getenv("K8S_CONTEXTS", "")
 
@@ -117,7 +122,6 @@ def _parse_clusters(args) -> list[tuple[str, str | None]]:
 
 
 def run_once(args, cfg, output_dir: Path) -> list[Path]:
-    """Executa uma rodada completa para todos os clusters."""
     clusters = _parse_clusters(args)
     generated_pdfs = []
 
@@ -127,10 +131,15 @@ def run_once(args, cfg, output_dir: Path) -> list[Path]:
 
         # Carrega histórico antes de coletar
         previous = load_previous(cluster_name)
+        previous_summary = previous.summary if previous else None
 
-        # Coleta
+        # Coleta — passa previous_summary para health trend
         try:
-            report = collect_all(cluster_name=cluster_name, context=context)
+            report = collect_all(
+                cluster_name=cluster_name,
+                context=context,
+                previous_summary=previous_summary,
+            )
         except Exception as e:
             logger.error(f"[{cluster_name}] Erro crítico na coleta: {e}")
             continue
@@ -145,6 +154,13 @@ def run_once(args, cfg, output_dir: Path) -> list[Path]:
                         f"(anterior: {previous.summary.get('health_score','?')}%)")
         else:
             logger.info(f"[{cluster_name}] Health: {report.summary['health_score']}% (sem histórico)")
+
+        # Log PVCs Pending alert
+        pvc_pending = report.summary.get("pvcs_pending_alert", 0)
+        if pvc_pending > 0:
+            pvc_list = report.summary.get("pvcs_pending_alert_list", [])
+            for pvc in pvc_list:
+                logger.warning(f"[{cluster_name}] PVC PENDING há {pvc['age']}: {pvc['ns']}/{pvc['name']}")
 
         # Salva cache
         save_snapshot(report)
@@ -169,7 +185,6 @@ def run_once(args, cfg, output_dir: Path) -> list[Path]:
         if args.no_notify:
             continue
 
-        # Watch + alert-only: verifica se deve notificar
         if args.alert_only:
             prev_sum = previous.summary if previous else None
             do_alert, reasons = should_alert(report, prev_sum)
@@ -194,7 +209,6 @@ def run_once(args, cfg, output_dir: Path) -> list[Path]:
 
 
 def watch_mode(args, cfg, output_dir: Path):
-    """Loop contínuo de coleta e notificação."""
     interval_sec = args.interval * 60
     logger.info(f"Modo WATCH ativo — intervalo: {args.interval} min | Ctrl+C para parar")
 

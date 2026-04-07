@@ -3,14 +3,20 @@
 # Autor:   Diego Regis M. F. dos Santos
 # Email:   diego-f-santos@openlabs.com.br
 # Time:    OpenLabs - DevOps | Infra
-# Versão:  2.0.0
+# Versão:  2.1.0
 # Arquivo: collector.py
 # Desc:    Coleta completa de dados do cluster Kubernetes
+# Changelog v2.1.0:
+#   - RESTART_THRESHOLD configurável via env var
+#   - PVC Pending/Lost como alerta crítico no summary
+#   - last_restart_ago calculado por pod
+#   - health_trend comparado com snapshot anterior
 # =============================================================================
 
 import subprocess
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -23,6 +29,10 @@ from models import (
 
 logger = logging.getLogger(__name__)
 
+# ── Thresholds configuráveis via env ──────────────────────────────────────────
+RESTART_THRESHOLD_SYS  = int(os.getenv("RESTART_THRESHOLD_SYS",  "20"))
+RESTART_THRESHOLD_APP  = int(os.getenv("RESTART_THRESHOLD_APP",  "5"))
+PVC_PENDING_ALERT_DAYS = int(os.getenv("PVC_PENDING_ALERT_DAYS", "1"))  # dias antes de virar alerta
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,8 +67,17 @@ def _age(ts: str) -> str:
         return "?"
 
 
+def _age_days(ts: str) -> float:
+    """Retorna idade em dias como float."""
+    try:
+        created = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        delta = datetime.now(timezone.utc) - created
+        return delta.total_seconds() / 86400
+    except Exception:
+        return 0.0
+
+
 def _cpu_to_m(cpu_str: str) -> int:
-    """Converte string de CPU para millicores."""
     if not cpu_str or cpu_str in ("N/A", "?", "<unknown>"):
         return 0
     try:
@@ -70,7 +89,6 @@ def _cpu_to_m(cpu_str: str) -> int:
 
 
 def _mem_to_mib(mem_str: str) -> int:
-    """Converte string de memória para MiB."""
     if not mem_str or mem_str in ("N/A", "?", "<unknown>"):
         return 0
     try:
@@ -93,7 +111,6 @@ def _mem_to_mib(mem_str: str) -> int:
 
 
 def _fmt_mem(mem_str: str) -> str:
-    """Formata memória Ki/Mi/Gi para formato legível curto ex: 16Gi, 512Mi."""
     if not mem_str or mem_str in ("N/A", "?", "<unknown>"):
         return mem_str or "?"
     try:
@@ -118,30 +135,16 @@ def _fmt_mem(mem_str: str) -> str:
 
 
 def _fmt_version(version: str) -> str:
-    """Abrevia versão do kubelet ex: v1.34.4+rke2r1 → v1.34.4"""
     if not version or version == "?":
         return version
-    # Remove sufixo +rke2r1, +k3s1, etc
     return version.split("+")[0]
 
 
 def _fmt_roles(roles_str: str) -> str:
-    """Abrevia roles ex: control-plane,etcd → ctrl,etcd"""
     return roles_str.replace("control-plane", "ctrl").replace("master", "mstr")
 
 
-
-    """Converte CPU allocatable para millicores."""
-    try:
-        if cpu_str.endswith("m"):
-            return int(cpu_str[:-1])
-        return int(float(cpu_str) * 1000)
-    except Exception:
-        return 1
-
-
 def _cpu_allocatable_m(cpu_str: str) -> int:
-    """Converte CPU allocatable para millicores."""
     try:
         if cpu_str.endswith("m"):
             return int(cpu_str[:-1])
@@ -151,7 +154,6 @@ def _cpu_allocatable_m(cpu_str: str) -> int:
 
 
 def _parse_top_nodes(output: str) -> dict[str, dict]:
-    """Parseia saída de kubectl top nodes."""
     result = {}
     for line in output.strip().splitlines()[1:]:
         parts = line.split()
@@ -164,7 +166,6 @@ def _parse_top_nodes(output: str) -> dict[str, dict]:
 
 
 def _parse_top_pods(output: str) -> dict[tuple, dict]:
-    """Parseia saída de kubectl top pods --all-namespaces."""
     result = {}
     for line in output.strip().splitlines()[1:]:
         parts = line.split()
@@ -184,7 +185,6 @@ def collect_nodes(ctx=None) -> list[NodeInfo]:
     if not ok:
         return []
 
-    # kubectl top nodes
     top_ok, top_out = _run(["top", "nodes", "--no-headers"], ctx, output_format="")
     top_data = _parse_top_nodes(top_out) if top_ok else {}
 
@@ -268,6 +268,21 @@ def collect_pods(ctx=None) -> list[PodInfo]:
             if len(images) > 1:
                 image_str += f" (+{len(images)-1})"
 
+            # ── Calcular último restart ──────────────────────────────────────
+            last_restart_ago = "N/A"
+            last_restart_ts = None
+            for c in containers:
+                lts = c.get("lastState", {}).get("terminated", {}).get("finishedAt", "")
+                if lts:
+                    try:
+                        dt = datetime.fromisoformat(lts.replace("Z", "+00:00"))
+                        if last_restart_ts is None or dt > last_restart_ts:
+                            last_restart_ts = dt
+                    except Exception:
+                        pass
+            if last_restart_ts:
+                last_restart_ago = _age(last_restart_ts.isoformat())
+
             t = top_data.get((ns, meta["name"]), {})
             pods.append(PodInfo(
                 name=meta["name"], namespace=ns, status=phase,
@@ -276,6 +291,7 @@ def collect_pods(ctx=None) -> list[PodInfo]:
                 node=spec.get("nodeName", "?"), image=image_str,
                 cpu_usage=t.get("cpu", "N/A"), mem_usage=t.get("mem", "N/A"),
                 cpu_millicores=t.get("cpu_m", 0), mem_mib=t.get("mem_mib", 0),
+                last_restart_ago=last_restart_ago,
             ))
     except Exception as e:
         logger.error(f"Erro ao parsear pods: {e}")
@@ -422,9 +438,10 @@ def collect_pvcs(ctx=None) -> list[PVCInfo]:
             spec = item.get("spec", {})
             st = item.get("status", {})
             vol_name = spec.get("volumeName", "?")
-            # Abrevia UUID do volume para não poluir a coluna
             if vol_name and vol_name.startswith("pvc-") and len(vol_name) > 16:
                 vol_name = vol_name[:15] + "…"
+            # Calcula idade em dias para alert de Pending
+            age_days = _age_days(meta["creationTimestamp"])
             result.append(PVCInfo(
                 name=meta["name"], namespace=meta.get("namespace", "?"),
                 status=st.get("phase", "?"),
@@ -433,6 +450,7 @@ def collect_pvcs(ctx=None) -> list[PVCInfo]:
                 access_modes=",".join(spec.get("accessModes", [])),
                 storage_class=spec.get("storageClassName", "?"),
                 age=_age(meta["creationTimestamp"]),
+                age_days=age_days,
             ))
     except Exception as e:
         logger.error(f"Erro ao parsear PVCs: {e}")
@@ -490,7 +508,6 @@ def collect_services(ctx=None) -> list[ServiceInfo]:
             st = item.get("status", {})
 
             svc_type = spec.get("type", "ClusterIP")
-            # Só inclui LoadBalancer, NodePort e ExternalName (ClusterIP é muito verboso)
             if svc_type not in ("LoadBalancer", "NodePort", "ExternalName"):
                 continue
 
@@ -569,7 +586,6 @@ def collect_events(ctx=None, limit: int = 60, exclude_namespaces: list = None) -
     if not ok:
         return []
 
-    # Namespaces a excluir dos eventos (ex: o próprio namespace do status-report)
     exclude = set(exclude_namespaces or ["status-report"])
 
     result = []
@@ -591,7 +607,7 @@ def collect_events(ctx=None, limit: int = 60, exclude_namespaces: list = None) -
             ))
     except Exception as e:
         logger.error(f"Erro ao parsear events: {e}")
-    return list(reversed(result))  # mais recentes primeiro
+    return list(reversed(result))
 
 
 def collect_namespaces(pods: list[PodInfo], ctx=None) -> list[NamespaceInfo]:
@@ -625,7 +641,7 @@ def collect_namespaces(pods: list[PodInfo], ctx=None) -> list[NamespaceInfo]:
     return result
 
 
-def build_summary(report: ClusterReport) -> dict:
+def build_summary(report: ClusterReport, previous=None) -> dict:
     pods = report.pods
     total = len(pods)
     running = sum(1 for p in pods if p.status == "Running")
@@ -633,21 +649,25 @@ def build_summary(report: ClusterReport) -> dict:
     failed  = sum(1 for p in pods if p.status in ("Failed", "CrashLoopBackOff", "OOMKilled"))
     crash   = sum(1 for p in pods if p.status == "CrashLoopBackOff")
     oom     = sum(1 for p in pods if p.status == "OOMKilled")
-    # Pods com restarts elevados — threshold maior para componentes de sistema
+
     SYSTEM_NS = {"kube-system", "kube-node-lease", "kube-public",
                  "cattle-system", "cattle-fleet-system", "cattle-fleet-local-system",
                  "cattle-capi-system", "cattle-turtles-system", "fleet-default",
-                 "fleet-local", "local", "local-path-storage"}
+                 "fleet-local", "local-path-storage"}
     high_r = [p for p in pods if (
-        (p.namespace in SYSTEM_NS and p.restarts >= 20) or
-        (p.namespace not in SYSTEM_NS and p.restarts >= 5)
+        (p.namespace in SYSTEM_NS and p.restarts >= RESTART_THRESHOLD_SYS) or
+        (p.namespace not in SYSTEM_NS and p.restarts >= RESTART_THRESHOLD_APP)
     )]
 
     nodes_ready = sum(1 for n in report.nodes if n.status == "Ready")
     pvcs_bound  = sum(1 for p in report.pvcs if p.status == "Bound")
     pvcs_lost   = sum(1 for p in report.pvcs if p.status == "Lost")
+    # PVCs Pending por mais de PVC_PENDING_ALERT_DAYS dias
+    pvcs_pending_alert = [
+        p for p in report.pvcs
+        if p.status == "Pending" and getattr(p, "age_days", 0) >= PVC_PENDING_ALERT_DAYS
+    ]
 
-    # Workloads
     deploys = report.deployments
     sts_list = report.statefulsets
     ds_list  = report.daemonsets
@@ -655,15 +675,13 @@ def build_summary(report: ClusterReport) -> dict:
     sts_degraded     = sum(1 for s in sts_list if s.ready < s.desired)
     ds_degraded      = sum(1 for d in ds_list if d.ready < d.desired)
 
-    # Eventos críticos
     warning_events = len([e for e in report.events if e.type == "Warning"])
 
-    # Top pods CPU/Mem (com métricas)
     pods_with_metrics = [p for p in pods if p.cpu_millicores > 0 or p.mem_mib > 0]
     top_cpu = sorted(pods_with_metrics, key=lambda p: p.cpu_millicores, reverse=True)[:10]
     top_mem = sorted(pods_with_metrics, key=lambda p: p.mem_mib, reverse=True)[:10]
 
-    # Score de saúde (ponderado)
+    # Score de saúde
     score = 100.0
     if total > 0:
         score -= (failed / total) * 40
@@ -672,8 +690,23 @@ def build_summary(report: ClusterReport) -> dict:
     score -= deploys_degraded * 3
     score -= sts_degraded * 3
     score -= pvcs_lost * 5
+    score -= len(pvcs_pending_alert) * 2  # penaliza PVCs Pending prolongados
     score -= min(warning_events * 0.5, 10)
     score = max(0.0, min(100.0, round(score, 1)))
+
+    # ── Health Trend ──────────────────────────────────────────────────────────
+    health_trend = None   # None = sem histórico, "up", "down", "stable"
+    health_delta = None
+    if previous and previous.get("health_score") is not None:
+        prev_score = previous["health_score"]
+        diff = round(score - prev_score, 1)
+        health_delta = diff
+        if diff > 0.5:
+            health_trend = "up"
+        elif diff < -0.5:
+            health_trend = "down"
+        else:
+            health_trend = "stable"
 
     return {
         # Nodes
@@ -685,7 +718,8 @@ def build_summary(report: ClusterReport) -> dict:
         "total_pods": total, "pods_running": running, "pods_pending": pending,
         "pods_failed": failed, "pods_crashloop": crash, "pods_oom": oom,
         "pods_high_restarts": len(high_r),
-        "high_restart_pods": [{"name": p.name, "ns": p.namespace, "restarts": p.restarts} for p in high_r[:15]],
+        "high_restart_pods": [{"name": p.name, "ns": p.namespace, "restarts": p.restarts,
+                                "last_restart": getattr(p, "last_restart_ago", "N/A")} for p in high_r[:15]],
         # Workloads
         "total_deployments": len(deploys),
         "deployments_ok": sum(1 for d in deploys if d.ready == d.desired and d.desired > 0),
@@ -697,20 +731,31 @@ def build_summary(report: ClusterReport) -> dict:
         "jobs_failed": sum(1 for j in report.jobs if j.status == "Failed"),
         # Storage / Network
         "total_pvcs": len(report.pvcs), "pvcs_bound": pvcs_bound, "pvcs_lost": pvcs_lost,
+        "pvcs_pending_alert": len(pvcs_pending_alert),
+        "pvcs_pending_alert_list": [{"name": p.name, "ns": p.namespace, "age": p.age}
+                                     for p in pvcs_pending_alert],
         "total_ingresses": len(report.ingresses),
         "total_services_exposed": len(report.services),
         "total_hpas": len(report.hpas),
         # Events
         "warning_events": warning_events,
         # Top recursos
-        "top_cpu_pods": [{"name": p.name, "ns": p.namespace, "cpu": p.cpu_usage, "cpu_m": p.cpu_millicores} for p in top_cpu],
-        "top_mem_pods": [{"name": p.name, "ns": p.namespace, "mem": p.mem_usage, "mem_mib": p.mem_mib} for p in top_mem],
-        # Score
+        "top_cpu_pods": [{"name": p.name, "ns": p.namespace, "cpu": p.cpu_usage,
+                          "cpu_m": p.cpu_millicores} for p in top_cpu],
+        "top_mem_pods": [{"name": p.name, "ns": p.namespace, "mem": p.mem_usage,
+                          "mem_mib": p.mem_mib} for p in top_mem],
+        # Score + Trend
         "health_score": score,
+        "health_trend": health_trend,
+        "health_delta": health_delta,
+        # Thresholds (para exibir no PDF)
+        "restart_threshold_app": RESTART_THRESHOLD_APP,
+        "restart_threshold_sys": RESTART_THRESHOLD_SYS,
     }
 
 
-def collect_all(cluster_name: str = "default", context: Optional[str] = None) -> ClusterReport:
+def collect_all(cluster_name: str = "default", context: Optional[str] = None,
+                previous_summary: dict = None) -> ClusterReport:
     logger.info(f"[{cluster_name}] Iniciando coleta completa...")
     ts = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     report = ClusterReport(collected_at=ts, cluster_name=cluster_name, context=context)
@@ -738,13 +783,12 @@ def collect_all(cluster_name: str = "default", context: Optional[str] = None) ->
             logger.warning(f"  ✗ {attr}: {e}")
             report.errors.append(f"Erro ao coletar {attr}: {e}")
 
-    # Namespaces (depende de pods para contagem)
     try:
         report.namespaces = collect_namespaces(report.pods, context)
         logger.info(f"  ✓ namespaces: {len(report.namespaces)} items")
     except Exception as e:
         report.errors.append(f"Erro ao coletar namespaces: {e}")
 
-    report.summary = build_summary(report)
+    report.summary = build_summary(report, previous=previous_summary)
     logger.info(f"[{cluster_name}] Coleta concluída — Health: {report.summary['health_score']}%")
     return report

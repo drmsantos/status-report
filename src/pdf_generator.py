@@ -3,9 +3,16 @@
 # Autor:   Diego Regis M. F. dos Santos
 # Email:   diego-f-santos@openlabs.com.br
 # Time:    OpenLabs - DevOps | Infra
-# Versao:  5.0.0
+# Versao:  6.0.0
 # Arquivo: pdf_generator.py
 # Desc:    K8s Status Report - Layout denso estilo dashboard corporativo
+# Changelog v6.0.0:
+#   - Health Score com trend (↑↓→) e delta vs anterior
+#   - Coluna "Último Restart" na tabela Pods com Atenção
+#   - PVC Pending prolongado como alerta crítico na pág 1
+#   - Página 1 mais limpa: Workloads movidos para pág 2 / Pods Atenção compacto
+#   - Rodapé com link do repo
+#   - Restart threshold exibido no rodapé da tabela de pods
 # =============================================================================
 
 import logging
@@ -54,7 +61,7 @@ C_GRAY = colors.HexColor('#6C7A7D')
 C_DARK = colors.HexColor('#1A252F')
 C_WHITE= colors.white
 C_LGRID= colors.HexColor('#C8E6E9')
-C_SEC  = colors.HexColor('#1B6B72')   # fundo seção header
+C_SEC  = colors.HexColor('#1B6B72')
 
 W, H  = A4
 MAR   = 12 * mm
@@ -117,7 +124,6 @@ def _tbl_style(hdr_bg=None):
 
 
 def _sec_hdr(title, width=None):
-    """Faixa colorida com título de seção — igual ao template."""
     w = width or USE
     return Table(
         [[Paragraph(title.upper(), ParagraphStyle('sh', fontName=B, fontSize=7,
@@ -158,20 +164,34 @@ def _pct_cell(pct, val, st):
     return Paragraph(f'<font color="{_hx(c)}"><b>{pct:.0f}%</b></font>', st['td_c'])
 
 
-# ── Health Score visual ────────────────────────────────────────────────────────
-def _health_gauge(score, w=110, h=70):
+# ── Health Score visual com trend ──────────────────────────────────────────────
+def _health_gauge(score, trend=None, delta=None, w=110, h=80):
     d = Drawing(w, h)
     c = C_OK if score >= 85 else (C_WARN if score >= 60 else C_CRIT)
-    # Background arc area
-    d.add(Rect(5, 18, w-10, 10, fillColor=C_BGL2, strokeColor=None, rx=5, ry=5))
-    # Fill
+
+    # Barra de progresso
+    d.add(Rect(5, 28, w-10, 10, fillColor=C_BGL2, strokeColor=None, rx=5, ry=5))
     fw = max(10, (score/100)*(w-10))
-    d.add(Rect(5, 18, fw, 10, fillColor=c, strokeColor=None, rx=5, ry=5))
+    d.add(Rect(5, 28, fw, 10, fillColor=c, strokeColor=None, rx=5, ry=5))
+
     # Score
-    d.add(String(w/2, 34, f'{score:.1f}%',
+    d.add(String(w/2, 44, f'{score:.1f}%',
                  textAnchor='middle', fontSize=22, fontName=B,
                  fillColor=_hx(c)))
-    d.add(String(w/2, 10, 'Health Score',
+
+    # Trend
+    if trend and delta is not None:
+        if trend == 'up':
+            t_sym, t_col = f'↑ +{delta}%', _hx(C_OK)
+        elif trend == 'down':
+            t_sym, t_col = f'↓ {delta}%', _hx(C_CRIT)
+        else:
+            t_sym, t_col = '→ estável', _hx(C_GRAY)
+        d.add(String(w/2, 18, t_sym,
+                     textAnchor='middle', fontSize=7, fontName=B,
+                     fillColor=t_col))
+
+    d.add(String(w/2, 8, 'Health Score',
                  textAnchor='middle', fontSize=7, fontName=N,
                  fillColor=_hx(C_GRAY)))
     return d
@@ -261,19 +281,8 @@ def _alert_row(sev, msg, col, col2):
                           ('VALIGN',(0,0),(-1,-1),'MIDDLE')]))
 
 
-# ── Bar horizontal simples ────────────────────────────────────────────────────
-def _hbar(label, val, maxval, color, w, h=8):
-    bw = max(2, (val/max(maxval,1))*w)
-    d = Drawing(w + 30, h + 2)
-    d.add(Rect(0, 1, w, h, fillColor=C_BGL2, strokeColor=None, rx=3, ry=3))
-    d.add(Rect(0, 1, bw, h, fillColor=color, strokeColor=None, rx=3, ry=3))
-    d.add(String(w + 4, 2, str(val), fontSize=6, fontName=B,
-                 fillColor=_hx(C_DARK)))
-    return d
-
-
 # ════════════════════════════════════════════════════════════════════════════════
-# PÁGINA 1 — EXECUTIVO (layout denso igual ao template)
+# PÁGINA 1 — EXECUTIVO (layout limpo: sem workloads, pods atenção compacto)
 # ════════════════════════════════════════════════════════════════════════════════
 def _pg_exec(report, st, delta):
     story = []
@@ -308,7 +317,8 @@ def _pg_exec(report, st, delta):
     story.append(hdr)
 
     # ── Status strip ──────────────────────────────────────────────────────────
-    has_c = s.get('nodes_not_ready',0)>0 or s.get('pods_crashloop',0)>0 or s.get('pvcs_lost',0)>0
+    has_c = (s.get('nodes_not_ready',0)>0 or s.get('pods_crashloop',0)>0
+             or s.get('pvcs_lost',0)>0 or s.get('pvcs_pending_alert',0)>0)
     has_w = (s.get('pods_failed',0)>0 or s.get('deployments_degraded',0)>0
              or s.get('pods_high_restarts',0)>0 or s.get('pods_pending',0)>0)
     sc = C_CRIT if has_c else (C_WARN if has_w else C_OK)
@@ -328,23 +338,26 @@ def _pg_exec(report, st, delta):
     story.append(_sec_hdr('Resumo Executivo'))
     story.append(Spacer(1, 4))
 
-    # Gauge + KPIs primários
+    # Gauge com trend + KPIs primários
     gauge_w = 118
     col6 = (USE - gauge_w - 18) / 6
     kpi_items = [
         (f"{s['nodes_ready']}/{s['total_nodes']}", 'Nodes Ready',
          C_OK if s['nodes_not_ready']==0 else C_CRIT, None),
-        (str(s['total_pods']),          'Pods Total',     C_P,    None),
-        (str(s['pods_running']),        'Running',        C_OK,   'pods OK'),
-        (str(s['pods_failed']),         'Failed / Crash',
+        (str(s['total_pods']),     'Pods Total',    C_P,   None),
+        (str(s['pods_running']),   'Running',       C_OK,  'pods OK'),
+        (str(s['pods_failed']),    'Failed / Crash',
          C_CRIT if s['pods_failed']>0 else C_OK, None),
-        (str(s['deployments_degraded']),'Deploys Deg.',
+        (str(s['deployments_degraded']), 'Deploys Deg.',
          C_CRIT if s['deployments_degraded']>0 else C_OK, None),
-        (str(s['warning_events']),      'Warnings',
+        (str(s['warning_events']), 'Warnings',
          C_CRIT if s['warning_events']>10 else (C_WARN if s['warning_events']>0 else C_OK), None),
     ]
     gauge_tbl = Table(
-        [[_health_gauge(s.get('health_score',100), w=gauge_w-8, h=62)]],
+        [[_health_gauge(s.get('health_score',100),
+                        trend=s.get('health_trend'),
+                        delta=s.get('health_delta'),
+                        w=gauge_w-8, h=75)]],
         colWidths=[gauge_w],
         style=TableStyle([('BACKGROUND',(0,0),(-1,-1),C_BGL),
                           ('BOX',(0,0),(-1,-1),0.5,C_A),
@@ -362,15 +375,23 @@ def _pg_exec(report, st, delta):
     story.append(Spacer(1, 4))
 
     # KPI secundários
+    pvc_label = 'PVCs Bound'
+    pvc_color = C_P
+    if s.get('pvcs_pending_alert', 0) > 0:
+        pvc_label = f"PVCs ⚠{s['pvcs_pending_alert']}Pend"
+        pvc_color = C_CRIT
+    elif s.get('pvcs_lost', 0) > 0:
+        pvc_color = C_CRIT
+
     col7 = USE / 7
     kpi2_items = [
         (s['total_namespaces'],   'Namespaces'),
         (s['total_statefulsets'], 'StatefulSets'),
         (s['total_daemonsets'],   'DaemonSets'),
-        (f"{s['pvcs_bound']}/{s['total_pvcs']}", 'PVCs Bound'),
+        (f"{s['pvcs_bound']}/{s['total_pvcs']}", pvc_label),
         (s['total_ingresses'],    'Ingresses'),
         (s['total_hpas'],         'HPAs'),
-        (s.get('total_cronjobs', '-'), 'CronJobs'),
+        (s.get('total_cronjobs','-'), 'CronJobs'),
     ]
     story.append(_kpi2_row(kpi2_items, col7, st))
     story.append(Spacer(1, 6))
@@ -378,21 +399,34 @@ def _pg_exec(report, st, delta):
     # ── 2 colunas: Alertas | Nodes ────────────────────────────────────────────
     col2 = USE / 2 - 6
 
-    # Alertas
+    # Alertas — inclui PVC Pending
     alerts = []
-    if s.get('pods_crashloop',0):       alerts.append((C_CRIT,'CRITICO',  f"{s['pods_crashloop']} Pod(s) em CrashLoopBackOff — argocd"))
-    if s.get('nodes_not_ready',0):      alerts.append((C_CRIT,'CRITICO',  f"{s['nodes_not_ready']} Node(s) NOT READY"))
-    if s.get('pvcs_lost',0):            alerts.append((C_CRIT,'CRITICO',  f"{s['pvcs_lost']} PVC(s) LOST"))
-    if s.get('deployments_degraded',0): alerts.append((C_WARN,'ATENCAO',  f"{s['deployments_degraded']} Deployment(s) degradado(s)"))
-    if s.get('pods_high_restarts',0):   alerts.append((C_WARN,'ATENCAO',  f"{s['pods_high_restarts']} Pod(s) com restarts elevados"))
-    if s.get('pods_failed',0):          alerts.append((C_WARN,'ATENCAO',  f"{s['pods_failed']} Pod(s) FAILED"))
-    if s.get('pods_pending',0):         alerts.append((C_WARN,'ATENCAO',  f"{s['pods_pending']} Pod(s) PENDING"))
-    if s.get('warning_events',0)>0:     alerts.append((C_INFO,'INFO',     f"{s['warning_events']} Warning Events recentes no cluster"))
+    if s.get('pods_crashloop',0):
+        alerts.append((C_CRIT,'CRITICO', f"{s['pods_crashloop']} Pod(s) em CrashLoopBackOff"))
+    if s.get('nodes_not_ready',0):
+        alerts.append((C_CRIT,'CRITICO', f"{s['nodes_not_ready']} Node(s) NOT READY"))
+    if s.get('pvcs_lost',0):
+        alerts.append((C_CRIT,'CRITICO', f"{s['pvcs_lost']} PVC(s) LOST"))
+    if s.get('pvcs_pending_alert',0):
+        pvc_list = s.get('pvcs_pending_alert_list', [])
+        names = ', '.join(f"{p['ns']}/{p['name']}" for p in pvc_list[:2])
+        alerts.append((C_CRIT,'CRITICO',
+                       f"{s['pvcs_pending_alert']} PVC(s) PENDING: {names}"))
+    if s.get('deployments_degraded',0):
+        alerts.append((C_WARN,'ATENCAO', f"{s['deployments_degraded']} Deployment(s) degradado(s)"))
+    if s.get('pods_high_restarts',0):
+        alerts.append((C_WARN,'ATENCAO', f"{s['pods_high_restarts']} Pod(s) com restarts elevados"))
+    if s.get('pods_failed',0):
+        alerts.append((C_WARN,'ATENCAO', f"{s['pods_failed']} Pod(s) FAILED"))
+    if s.get('pods_pending',0):
+        alerts.append((C_WARN,'ATENCAO', f"{s['pods_pending']} Pod(s) PENDING"))
+    if s.get('warning_events',0)>0:
+        alerts.append((C_INFO,'INFO', f"{s['warning_events']} Warning Events recentes no cluster"))
 
     al_block = [_sec_hdr('Alertas Ativos', col2)]
     al_block.append(Spacer(1, 3))
     if alerts:
-        for col, sev, msg in alerts[:6]:
+        for col, sev, msg in alerts[:7]:
             al_block.append(_alert_row(sev, msg, col, col2))
             al_block.append(Spacer(1, 2))
     else:
@@ -426,7 +460,6 @@ def _pg_exec(report, st, delta):
     story.append(Spacer(1, 6))
 
     # ── 2 colunas: Top Namespaces | Status Pods ───────────────────────────────
-    # Top Namespaces
     ns_sorted = sorted(report.namespaces, key=lambda n: n.pod_count, reverse=True)
     ns_active = [n for n in ns_sorted if n.pod_count > 0]
     NS_COLORS = ['#0D5C63','#117A65','#1A8A94','#2E86C1','#6C3483','#784212','#1B4332']
@@ -479,41 +512,57 @@ def _pg_exec(report, st, delta):
                                          ('BOTTOMPADDING',(0,0),(-1,-1),0)])))
     story.append(Spacer(1, 6))
 
-    # ── Pods com Atenção (inline na pág 1) ────────────────────────────────────
+    # ── Pods com Atenção compacto (inline pág 1) — com coluna Último Restart ──
     SYS = {'kube-system','kube-node-lease','kube-public','cattle-system',
            'cattle-fleet-system','cattle-fleet-local-system','cattle-capi-system',
            'cattle-turtles-system','fleet-default','fleet-local','local-path-storage'}
+    thr_app = s.get('restart_threshold_app', 5)
+    thr_sys = s.get('restart_threshold_sys', 20)
     problem_pods = [p for p in report.pods if (
         p.status not in ('Running','Succeeded') or
-        (p.namespace in SYS and p.restarts >= 20) or
-        (p.namespace not in SYS and p.restarts >= 5))]
+        (p.namespace in SYS and p.restarts >= thr_sys) or
+        (p.namespace not in SYS and p.restarts >= thr_app))]
 
     story.append(_sec_hdr(f'Pods com Atencao ({len(problem_pods)})'))
     story.append(Spacer(1, 3))
     if problem_pods:
-        ph = ['Pod', 'Status', 'Restarts']
+        ph = ['Pod', 'Status', 'Restarts', 'Último Restart']
         pd_data = [ph]
-        for p in problem_pods[:5]:
+        for p in problem_pods[:6]:
+            last_r = getattr(p, 'last_restart_ago', 'N/A')
             pd_data.append([
-                Paragraph(p.name[:35], st['td_b']),
+                Paragraph(p.name[:38], st['td_b']),
                 _status_cell(p.status, st),
                 Paragraph(str(p.restarts), st['td_c']),
+                Paragraph(last_r, st['td_g']),
             ])
-        pw = [r*USE for r in [0.70, 0.18, 0.12]]
+        pw = [r*USE for r in [0.58, 0.18, 0.10, 0.14]]
         pt = Table(pd_data, colWidths=pw, repeatRows=1)
         pt.setStyle(_tbl_style())
         story.append(pt)
+        story.append(Paragraph(
+            f'* Threshold: app ≥{thr_app} restarts | system ≥{thr_sys} restarts',
+            ParagraphStyle('', fontName=IT, fontSize=5.5, textColor=C_GRAY, leading=8)
+        ))
     else:
         story.append(Paragraph('Nenhum pod com problemas.', st['td']))
-    story.append(Spacer(1, 6))
+
+    return story
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# PÁGINA 2 — WORKLOADS VISÃO GERAL + RECURSOS
+# ════════════════════════════════════════════════════════════════════════════════
+def _pg_resources(report, st):
+    story = [PageBreak()]
+    s = report.summary
 
     # ── Workloads — Visão Geral (3 colunas) ──────────────────────────────────
     story.append(_sec_hdr('Workloads — Visao Geral'))
-    story.append(Spacer(1, 3))
+    story.append(Spacer(1, 4))
 
     col3 = USE / 3 - 4
 
-    # Coluna 1: Deployments resumo
     dep_ok   = [d for d in report.deployments if d.ready == d.desired and d.desired > 0]
     dep_bad  = [d for d in report.deployments if d.ready != d.desired or d.desired == 0]
     dep_hd   = ['Deployment', 'NS', 'Status']
@@ -533,22 +582,26 @@ def _pg_exec(report, st, delta):
     dep_ws = [r*col3 for r in [0.52, 0.26, 0.22]]
     dep_t = Table(dep_data, colWidths=dep_ws, repeatRows=1)
     dep_t.setStyle(_tbl_style())
-    dep_block = [Paragraph('Deployments (40 total)', ParagraphStyle('', fontName=B, fontSize=7,
-                 textColor=C_P, leading=10)), Spacer(1,2), dep_t]
+    dep_block = [Paragraph(f'Deployments ({s["total_deployments"]} total)',
+                           ParagraphStyle('', fontName=B, fontSize=7, textColor=C_P, leading=10)),
+                 Spacer(1,2), dep_t]
 
-    # Coluna 2: Storage (PVCs)
+    # PVCs — com destaque para Pending alert
     pvc_hd   = ['PVC', 'Cap.', 'Status']
     pvc_data = [pvc_hd]
-    for p in report.pvcs[:6]:
+    for p in report.pvcs[:7]:
         pvc_data.append([
             Paragraph(p.name[:18], st['td_b']),
             Paragraph(p.capacity,  st['td_c']),
             _status_cell(p.status, st),
         ])
     bound = sum(1 for p in report.pvcs if p.status.upper()=='BOUND')
+    pend_alert = s.get('pvcs_pending_alert', 0)
+    pvc_note = f'+ {bound} PVCs Bound'
+    if pend_alert:
+        pvc_note += f'  ⚠ {pend_alert} Pending'
     pvc_data.append([
-        Paragraph(f'+ {bound} PVCs Bound',
-                  ParagraphStyle('', fontName=IT, fontSize=6, textColor=C_GRAY, leading=8)),
+        Paragraph(pvc_note, ParagraphStyle('', fontName=IT, fontSize=6, textColor=C_GRAY, leading=8)),
         Paragraph('', st['td']), Paragraph('', st['td']),
     ])
     pvc_ws = [r*col3 for r in [0.52, 0.22, 0.26]]
@@ -557,7 +610,7 @@ def _pg_exec(report, st, delta):
     pvc_block = [Paragraph('Storage (PVCs)', ParagraphStyle('', fontName=B, fontSize=7,
                  textColor=C_P, leading=10)), Spacer(1,2), pvc_t]
 
-    # Coluna 3: Top CPU/Mem pods
+    # Top CPU/Mem
     top_cpu = s.get('top_cpu_pods', [])
     top_mem = s.get('top_mem_pods', [])
     tm_hd   = ['Pod', 'CPU', 'Mem']
@@ -583,15 +636,9 @@ def _pg_exec(report, st, delta):
                                          ('RIGHTPADDING',(0,0),(1,0),8),
                                          ('TOPPADDING',(0,0),(-1,-1),0),
                                          ('BOTTOMPADDING',(0,0),(-1,-1),0)])))
-    return story
+    story.append(Spacer(1, 8))
 
-
-# ════════════════════════════════════════════════════════════════════════════════
-# PÁGINA 2 — RECURSOS (namespaces + top pods)
-# ════════════════════════════════════════════════════════════════════════════════
-def _pg_resources(report, st):
-    story = [PageBreak()]
-    s = report.summary
+    # ── Namespaces Detalhado ───────────────────────────────────────────────────
     ns_sorted = sorted(report.namespaces, key=lambda n: n.pod_count, reverse=True)
     ns_active = [n for n in ns_sorted if n.pod_count > 0]
     ns_empty  = [n for n in ns_sorted if n.pod_count == 0]
@@ -622,7 +669,7 @@ def _pg_resources(report, st):
     story.append(t)
     story.append(Spacer(1, 8))
 
-    # Top pods
+    # ── Top Pods por Recurso ───────────────────────────────────────────────────
     story.append(_sec_hdr('Top Pods por Consumo de Recurso'))
     story.append(Spacer(1, 4))
     top_cpu = s.get('top_cpu_pods', [])
@@ -694,13 +741,12 @@ def _pg_nodes(report, st):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# PÁGINA 4 — WORKLOADS
+# PÁGINA 4 — WORKLOADS DETALHADO
 # ════════════════════════════════════════════════════════════════════════════════
 def _pg_workloads(report, st):
     story = [PageBreak()]
     col2 = USE / 2 - 4
 
-    # Deployments
     story.append(_sec_hdr('Deployments'))
     story.append(Spacer(1, 4))
     hd = ['Deployment','Namespace','Desejado','Pronto','Disponivel','Atualizado','Idade']
@@ -723,7 +769,6 @@ def _pg_workloads(report, st):
     story.append(t)
     story.append(Spacer(1, 8))
 
-    # StatefulSets + DaemonSets
     left, right = [], []
     if report.statefulsets:
         left.append(_sec_hdr('StatefulSets', col2))
@@ -765,7 +810,6 @@ def _pg_workloads(report, st):
                                              ('BOTTOMPADDING',(0,0),(-1,-1),0)])))
         story.append(Spacer(1, 8))
 
-    # CronJobs + Jobs
     cj_s, job_s = [], []
     if report.cronjobs:
         cj_s.append(_sec_hdr('CronJobs', col2))
@@ -810,37 +854,47 @@ def _pg_workloads(report, st):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# PÁGINA 5 — PODS
+# PÁGINA 5 — PODS — com coluna Último Restart
 # ════════════════════════════════════════════════════════════════════════════════
 def _pg_pods(report, st):
     story = [PageBreak()]
+    s = report.summary
+    thr_app = s.get('restart_threshold_app', 5)
+    thr_sys = s.get('restart_threshold_sys', 20)
     SYS = {'kube-system','kube-node-lease','kube-public','cattle-system',
            'cattle-fleet-system','cattle-fleet-local-system','cattle-capi-system',
            'cattle-turtles-system','fleet-default','fleet-local','local-path-storage'}
     problem = [p for p in report.pods if (
         p.status not in ('Running','Succeeded') or
-        (p.namespace in SYS     and p.restarts >= 20) or
-        (p.namespace not in SYS and p.restarts >= 5))]
+        (p.namespace in SYS     and p.restarts >= thr_sys) or
+        (p.namespace not in SYS and p.restarts >= thr_app))]
     normal = [p for p in report.pods if p not in problem]
 
     story.append(_sec_hdr(f'Pods — Atencao ({len(problem)})'))
     story.append(Spacer(1, 4))
-    hd = ['Pod','Namespace','Status','Ready','Restarts','CPU','Mem','Node','Idade']
+    hd = ['Pod','Namespace','Status','Ready','Restarts','Últ.Restart','CPU','Mem','Node','Idade']
     data = [hd]
     for p in problem:
-        data.append([Paragraph(p.name[:28], st['td_b']),
-                     Paragraph(p.namespace, st['td_g']),
+        last_r = getattr(p, 'last_restart_ago', 'N/A')
+        data.append([Paragraph(p.name[:24], st['td_b']),
+                     Paragraph(p.namespace[:10], st['td_g']),
                      _status_cell(p.status, st),
                      Paragraph(p.ready, st['td_c']),
                      Paragraph(str(p.restarts), st['td_c']),
+                     Paragraph(last_r, st['td_g']),
                      Paragraph(p.cpu_usage, st['td_c']),
                      Paragraph(p.mem_usage, st['td_c']),
-                     Paragraph(p.node[:14] if p.node else '?', st['td_g']),
+                     Paragraph(p.node[:12] if p.node else '?', st['td_g']),
                      Paragraph(p.age, st['td_g'])])
-    ws = [r*USE for r in [0.21,0.12,0.16,0.06,0.07,0.07,0.07,0.14,0.06]]
+    ws = [r*USE for r in [0.18,0.10,0.13,0.05,0.07,0.09,0.06,0.07,0.12,0.05]]
     t = Table(data, colWidths=ws, repeatRows=1)
     t.setStyle(_tbl_style())
     story.append(t)
+    story.append(Paragraph(
+        f'* Threshold: app ≥{thr_app} restarts | system ≥{thr_sys} restarts  '
+        f'(configurável via RESTART_THRESHOLD_APP / RESTART_THRESHOLD_SYS)',
+        ParagraphStyle('', fontName=IT, fontSize=5.5, textColor=C_GRAY, leading=8)
+    ))
     story.append(Spacer(1, 8))
 
     story.append(_sec_hdr(f'Pods — Saudaveis ({min(50,len(normal))} de {len(normal)})'))
@@ -868,14 +922,21 @@ def _pg_pods(report, st):
 # ════════════════════════════════════════════════════════════════════════════════
 def _pg_net_stor(report, st):
     story = [PageBreak()]
-    col2 = USE / 2 - 4
 
     story.append(_sec_hdr('PersistentVolumeClaims'))
     story.append(Spacer(1, 4))
     hd = ['PVC','Namespace','Status','Volume','Cap.','StorageClass','Modo','Idade']
     data = [hd]
     for p in report.pvcs:
-        data.append([Paragraph(p.name[:22], st['td_b']),
+        # Destaca Pending prolongado
+        age_days = getattr(p, 'age_days', 0)
+        from collector import PVC_PENDING_ALERT_DAYS
+        is_pend_alert = p.status == 'Pending' and age_days >= PVC_PENDING_ALERT_DAYS
+        name_para = (
+            Paragraph(f'<font color="{_hx(C_CRIT)}"><b>{p.name[:22]}</b></font>', st['td_b'])
+            if is_pend_alert else Paragraph(p.name[:22], st['td_b'])
+        )
+        data.append([name_para,
                      Paragraph(p.namespace, st['td_g']),
                      _status_cell(p.status, st),
                      Paragraph(p.volume[:16], st['td_g']),
@@ -891,7 +952,7 @@ def _pg_net_stor(report, st):
 
     left, right = [], []
     if report.ingresses:
-        left.append(_sec_hdr('Ingresses', col2))
+        left.append(_sec_hdr('Ingresses', USE))
         left.append(Spacer(1, 3))
         hi = ['Ingress','Namespace','Hosts','Ports','Idade']
         di = [hi]
@@ -904,11 +965,11 @@ def _pg_net_stor(report, st):
         wi = [r*USE for r in [0.16,0.13,0.48,0.14,0.09]]
         ti = Table(di, colWidths=wi, repeatRows=1); ti.setStyle(_tbl_style())
         left.append(ti)
-        left.append(Spacer(1,6))
+        left.append(Spacer(1, 8))
 
     if report.services:
-        right.append(_sec_hdr('Services Expostos', col2))
-        right.append(Spacer(1, 3))
+        left.append(_sec_hdr('Services Expostos', USE))
+        left.append(Spacer(1, 3))
         hs2 = ['Service','Namespace','Tipo','External IP','Ports','Idade']
         ds = [hs2]
         for sv in report.services:
@@ -920,16 +981,11 @@ def _pg_net_stor(report, st):
                        Paragraph(sv.age, st['td_g'])])
         ws2 = [r*USE for r in [0.16,0.11,0.12,0.14,0.37,0.10]]
         ts = Table(ds, colWidths=ws2, repeatRows=1); ts.setStyle(_tbl_style())
-        right.append(ts)
+        left.append(ts)
+        left.append(Spacer(1, 8))
 
-    if left:
-        for item in left:
-            story.append(item)
-        story.append(Spacer(1, 8))
-    if right:
-        for item in right:
-            story.append(item)
-        story.append(Spacer(1, 8))
+    for item in left:
+        story.append(item)
 
     if report.hpas:
         story.append(_sec_hdr('Horizontal Pod Autoscalers'))
@@ -980,7 +1036,7 @@ def _pg_events(report, st):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
-# RODAPÉ
+# RODAPÉ com link do repo
 # ════════════════════════════════════════════════════════════════════════════════
 class _Doc(SimpleDocTemplate):
     def __init__(self, fn, report, **kw):
@@ -1000,7 +1056,8 @@ class _Doc(SimpleDocTemplate):
         c.setFillColor(C_WHITE)
         c.drawString(MAR, 3*mm,
             f'OpenLabs  |  K8s Status Report  |  {r.cluster_name}  |  {r.collected_at}  |  Confidencial')
-        c.drawRightString(W-MAR, 3*mm, f'Pagina {c.getPageNumber()}')
+        c.drawRightString(W-MAR, 3*mm,
+            f'github.com/drmsantos/status-report  |  Pagina {c.getPageNumber()}')
         c.restoreState()
 
 

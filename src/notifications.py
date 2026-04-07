@@ -3,9 +3,14 @@
 # Autor:   Diego Regis M. F. dos Santos
 # Email:   diego-f-santos@openlabs.com.br
 # Time:    OpenLabs - DevOps | Infra
-# Versão:  2.0.0
+# Versão:  2.1.0
 # Arquivo: notifications.py
 # Desc:    Envio de notificações — E-mail (O365), Teams Webhook, Slack Webhook
+# Changelog v2.1.0:
+#   - PVC Pending alert integrado nos alertas de e-mail/Teams/Slack
+#   - Health trend (↑↓→) no e-mail e Teams card
+#   - Slack melhorado: campos PVC Pending + trend
+#   - should_alert: detecta PVC Pending prolongado
 # =============================================================================
 
 import os
@@ -29,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class NotificationConfig:
-    # E-mail / Office 365
     smtp_host:     str = "smtp.office365.com"
     smtp_port:     int = 587
     smtp_user:     str = ""
@@ -40,13 +44,9 @@ class NotificationConfig:
     cc:            list = field(default_factory=list)
     bcc:           list = field(default_factory=list)
     reply_to:      str = ""
-
-    # Teams
     teams_webhook: str = ""
-
-    # Slack
     slack_webhook: str = ""
-    slack_channel: str = ""   # ex: #devops-alerts
+    slack_channel: str = ""
 
 
 def load_config() -> NotificationConfig:
@@ -67,6 +67,48 @@ def load_config() -> NotificationConfig:
     return cfg
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _trend_str(summary: dict) -> str:
+    """Retorna string de trend ex: '↑ +1.5%', '↓ -2.0%', '→ estável'"""
+    trend = summary.get("health_trend")
+    delta = summary.get("health_delta")
+    if trend is None:
+        return ""
+    if trend == "up":
+        return f"↑ +{delta}%"
+    if trend == "down":
+        return f"↓ {delta}%"
+    return "→ estável"
+
+
+def _build_alert_items(s: dict) -> list[str]:
+    """Constrói lista de alertas unificada incluindo PVC Pending."""
+    items = []
+    if s.get("nodes_not_ready", 0):
+        items.append(f"⛔ {s['nodes_not_ready']} Node(s) NOT READY")
+    if s.get("pods_crashloop", 0):
+        items.append(f"⛔ {s['pods_crashloop']} Pod(s) CrashLoopBackOff")
+    if s.get("pods_oom", 0):
+        items.append(f"⛔ {s['pods_oom']} Pod(s) OOMKilled")
+    if s.get("pvcs_lost", 0):
+        items.append(f"⛔ {s['pvcs_lost']} PVC(s) LOST")
+    # PVC Pending prolongado — alerta crítico
+    if s.get("pvcs_pending_alert", 0):
+        pvc_list = s.get("pvcs_pending_alert_list", [])
+        names = ", ".join(f"{p['ns']}/{p['name']}" for p in pvc_list[:3])
+        items.append(f"⛔ {s['pvcs_pending_alert']} PVC(s) PENDING prolongado: {names}")
+    if s.get("pods_failed", 0):
+        items.append(f"⚠ {s['pods_failed']} Pod(s) FAILED")
+    if s.get("pods_pending", 0):
+        items.append(f"⚠ {s['pods_pending']} Pod(s) PENDING")
+    if s.get("deployments_degraded", 0):
+        items.append(f"⚠ {s['deployments_degraded']} Deployment(s) degradado(s)")
+    if s.get("pods_high_restarts", 0):
+        items.append(f"⚠ {s['pods_high_restarts']} Pod(s) com restarts elevados")
+    return items
+
+
 # ── HTML do e-mail ────────────────────────────────────────────────────────────
 
 def _email_html(report: ClusterReport, delta: dict) -> str:
@@ -74,24 +116,21 @@ def _email_html(report: ClusterReport, delta: dict) -> str:
     health = s.get("health_score", 100)
     hc = "#27AE60" if health >= 85 else "#F39C12" if health >= 60 else "#E74C3C"
 
-    has_crit = s.get("nodes_not_ready",0) > 0 or s.get("pods_crashloop",0) > 0 or s.get("pvcs_lost",0) > 0
-    has_warn = s.get("pods_pending",0) > 0 or s.get("deployments_degraded",0) > 0
+    has_crit = (s.get("nodes_not_ready", 0) > 0 or s.get("pods_crashloop", 0) > 0
+                or s.get("pvcs_lost", 0) > 0 or s.get("pvcs_pending_alert", 0) > 0)
+    has_warn = s.get("pods_pending", 0) > 0 or s.get("deployments_degraded", 0) > 0
     banner_c = "#E74C3C" if has_crit else ("#F39C12" if has_warn else "#27AE60")
     banner_t = ("⛔ CRÍTICO — Falhas detectadas" if has_crit
                 else ("⚠ ATENÇÃO — Verificação necessária" if has_warn
                       else "✅ Cluster Operacional"))
 
-    # Alertas
-    alert_items = []
-    if s.get("nodes_not_ready",0):     alert_items.append(f"⛔ {s['nodes_not_ready']} Node(s) NOT READY")
-    if s.get("pods_crashloop",0):      alert_items.append(f"⛔ {s['pods_crashloop']} Pod(s) CrashLoopBackOff")
-    if s.get("pods_oom",0):            alert_items.append(f"⛔ {s['pods_oom']} Pod(s) OOMKilled")
-    if s.get("pvcs_lost",0):           alert_items.append(f"⛔ {s['pvcs_lost']} PVC(s) LOST")
-    if s.get("pods_failed",0):         alert_items.append(f"⚠ {s['pods_failed']} Pod(s) FAILED")
-    if s.get("pods_pending",0):        alert_items.append(f"⚠ {s['pods_pending']} Pod(s) PENDING")
-    if s.get("deployments_degraded",0):alert_items.append(f"⚠ {s['deployments_degraded']} Deployment(s) degradado(s)")
-    if s.get("pods_high_restarts",0):  alert_items.append(f"⚠ {s['pods_high_restarts']} Pod(s) com ≥5 restarts")
+    trend_s = _trend_str(s)
+    trend_html = ""
+    if trend_s:
+        tc = "#27AE60" if "↑" in trend_s else ("#E74C3C" if "↓" in trend_s else "#888")
+        trend_html = f' <span style="color:{tc};font-size:13px;">{trend_s}</span>'
 
+    alert_items = _build_alert_items(s)
     alerts_html = ""
     if alert_items:
         items_html = "".join(f"<li style='padding:2px 0;'>{a}</li>" for a in alert_items)
@@ -107,6 +146,7 @@ def _email_html(report: ClusterReport, delta: dict) -> str:
         rows = ""
         keys = [("health_score","Health Score",False),("pods_running","Pods Running",False),
                 ("pods_failed","Pods Failed",True),("deployments_degraded","Deploys Degradados",True),
+                ("pvcs_pending_alert","PVCs Pending Alert",True),
                 ("warning_events","Warning Events",True)]
         for key, label, bad_up in keys:
             d = delta.get(key, {})
@@ -132,7 +172,6 @@ def _email_html(report: ClusterReport, delta: dict) -> str:
             <th style="padding:5px 8px;text-align:left;">Δ</th>
           </tr></thead><tbody>{rows}</tbody></table>"""
 
-    # KPIs
     def kpi(val, label, color="#0D5C63"):
         return f"""<td width="16%" style="background:#F0F7F8;border-radius:6px;padding:10px;text-align:center;border:1px solid #C0D8DA;">
             <div style="font-size:22px;font-weight:bold;color:{color};">{val}</div>
@@ -156,7 +195,7 @@ def _email_html(report: ClusterReport, delta: dict) -> str:
     <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:4px;">
       <tr>
         <td width="20%" align="center" style="background:#F0F7F8;border-radius:8px;padding:14px;border:1px solid #C0D8DA;">
-          <div style="font-size:34px;font-weight:bold;color:{hc};">{health}%</div>
+          <div style="font-size:34px;font-weight:bold;color:{hc};">{health}%{trend_html}</div>
           <div style="font-size:11px;color:#7F8C8D;">Health Score</div>
         </td>
         <td width="4%"></td>
@@ -174,7 +213,8 @@ def _email_html(report: ClusterReport, delta: dict) -> str:
               {kpi(s['total_namespaces'], "Namespaces")}
               {kpi(s['total_statefulsets'], "StatefulSets")}
               {kpi(s['total_daemonsets'], "DaemonSets")}
-              {kpi(f"{s['pvcs_bound']}/{s['total_pvcs']}", "PVCs Bound", "#27AE60" if s['pvcs_lost']==0 else "#E74C3C")}
+              {kpi(f"{s['pvcs_bound']}/{s['total_pvcs']}", "PVCs Bound",
+                   "#E74C3C" if (s['pvcs_lost']>0 or s.get('pvcs_pending_alert',0)>0) else "#27AE60")}
               {kpi(s['total_ingresses'], "Ingresses")}
               {kpi(s['total_hpas'], "HPAs")}
             </tr>
@@ -197,23 +237,33 @@ def _email_html(report: ClusterReport, delta: dict) -> str:
 def _teams_card(report: ClusterReport) -> dict:
     s = report.summary
     health = s.get("health_score", 100)
-    hc = "Good" if health >= 85 else ("Warning" if health >= 60 else "Attention")
+    trend_s = _trend_str(s)
 
-    facts = [
-        {"name": "Health Score", "value": f"{health}%"},
-        {"name": "Nodes Ready", "value": f"{s['nodes_ready']}/{s['total_nodes']}"},
-        {"name": "Pods Running", "value": str(s['pods_running'])},
-        {"name": "Pods Failed",  "value": str(s['pods_failed'])},
-        {"name": "Pods Pending", "value": str(s['pods_pending'])},
-        {"name": "Deploys Degradados", "value": str(s['deployments_degraded'])},
-        {"name": "Warning Events", "value": str(s['warning_events'])},
-        {"name": "PVCs Lost", "value": str(s['pvcs_lost'])},
-    ]
-
-    has_crit = s.get("nodes_not_ready",0) > 0 or s.get("pods_crashloop",0) > 0
+    has_crit = (s.get("nodes_not_ready", 0) > 0 or s.get("pods_crashloop", 0) > 0
+                or s.get("pvcs_pending_alert", 0) > 0)
     theme_c  = "attention" if has_crit else ("warning" if health < 85 else "good")
 
-    # Adaptive Card (Teams)
+    health_str = f"{health}%"
+    if trend_s:
+        health_str += f"  {trend_s}"
+
+    facts = [
+        {"name": "Health Score",       "value": health_str},
+        {"name": "Nodes Ready",        "value": f"{s['nodes_ready']}/{s['total_nodes']}"},
+        {"name": "Pods Running",        "value": str(s['pods_running'])},
+        {"name": "Pods Failed",         "value": str(s['pods_failed'])},
+        {"name": "Pods Pending",        "value": str(s['pods_pending'])},
+        {"name": "Deploys Degradados",  "value": str(s['deployments_degraded'])},
+        {"name": "Warning Events",      "value": str(s['warning_events'])},
+        {"name": "PVCs Lost",           "value": str(s['pvcs_lost'])},
+    ]
+
+    # Adiciona PVC Pending se houver
+    if s.get("pvcs_pending_alert", 0):
+        pvc_list = s.get("pvcs_pending_alert_list", [])
+        names = ", ".join(f"{p['ns']}/{p['name']}" for p in pvc_list[:3])
+        facts.append({"name": "⛔ PVCs Pending", "value": f"{s['pvcs_pending_alert']} — {names}"})
+
     return {
         "type": "message",
         "attachments": [{
@@ -266,20 +316,49 @@ def _slack_payload(report: ClusterReport) -> dict:
     health = s.get("health_score", 100)
     emoji  = "✅" if health >= 85 else ("⚠️" if health >= 60 else "🚨")
     color  = "#27AE60" if health >= 85 else ("#F39C12" if health >= 60 else "#E74C3C")
+    trend_s = _trend_str(s)
+
+    health_text = f"*{health}%*"
+    if trend_s:
+        health_text += f"  {trend_s}"
 
     fields = [
-        {"title": "Nodes Ready",       "value": f"{s['nodes_ready']}/{s['total_nodes']}", "short": True},
-        {"title": "Pods Running",       "value": str(s['pods_running']),                   "short": True},
-        {"title": "Pods Failed",        "value": str(s['pods_failed']),                    "short": True},
-        {"title": "Deploys Degradados", "value": str(s['deployments_degraded']),           "short": True},
-        {"title": "Warning Events",     "value": str(s['warning_events']),                 "short": True},
-        {"title": "PVCs Lost",          "value": str(s['pvcs_lost']),                      "short": True},
+        {"title": "Nodes Ready",        "value": f"{s['nodes_ready']}/{s['total_nodes']}", "short": True},
+        {"title": "Pods Running",        "value": str(s['pods_running']),                   "short": True},
+        {"title": "Pods Failed",         "value": str(s['pods_failed']),                    "short": True},
+        {"title": "Deploys Degradados",  "value": str(s['deployments_degraded']),           "short": True},
+        {"title": "Warning Events",      "value": str(s['warning_events']),                 "short": True},
+        {"title": "PVCs Lost",           "value": str(s['pvcs_lost']),                      "short": True},
     ]
+
+    # PVC Pending alert
+    if s.get("pvcs_pending_alert", 0):
+        pvc_list = s.get("pvcs_pending_alert_list", [])
+        names = ", ".join(f"{p['ns']}/{p['name']}" for p in pvc_list[:2])
+        fields.append({
+            "title": "⛔ PVCs Pending",
+            "value": f"{s['pvcs_pending_alert']} — {names}",
+            "short": False,
+        })
+
+    # Pods com restart alto — resumo
+    if s.get("pods_high_restarts", 0):
+        high = s.get("high_restart_pods", [])
+        summary_str = ", ".join(
+            f"{p['name'][:20]} ({p['restarts']}r, last {p.get('last_restart','?')})"
+            for p in high[:3]
+        )
+        fields.append({
+            "title": f"⚠ High Restarts ({s['pods_high_restarts']})",
+            "value": summary_str,
+            "short": False,
+        })
+
     payload = {
         "attachments": [{
             "color":  color,
             "pretext": f"{emoji} *K8s Status Report — {report.cluster_name}*",
-            "text":   f"Health Score: *{health}%* | Gerado em: {report.collected_at}",
+            "text":   f"Health Score: {health_text} | Gerado em: {report.collected_at}",
             "fields": fields,
             "footer": "OpenLabs DevOps | Infra",
             "ts":     int(__import__("time").time()),
@@ -321,7 +400,8 @@ def send_email(report: ClusterReport, pdf_path: str,
     msg["Subject"] = f"[K8s] Status Report — {report.cluster_name} — {report.collected_at}"
 
     s = report.summary
-    has_crit = s.get("nodes_not_ready",0) > 0 or s.get("pods_crashloop",0) > 0
+    has_crit = (s.get("nodes_not_ready", 0) > 0 or s.get("pods_crashloop", 0) > 0
+                or s.get("pvcs_pending_alert", 0) > 0)
     if has_crit:
         msg["X-Priority"] = "1"
         msg["X-MSMail-Priority"] = "High"
@@ -362,28 +442,33 @@ def send_email(report: ClusterReport, pdf_path: str,
 # ── Watch mode helpers ────────────────────────────────────────────────────────
 
 def should_alert(report: ClusterReport, prev_summary: dict = None) -> tuple[bool, list[str]]:
-    """Determina se há razão para enviar alerta no modo watch."""
     s = report.summary
     reasons = []
 
-    if s.get("nodes_not_ready",0) > 0:
+    if s.get("nodes_not_ready", 0) > 0:
         reasons.append(f"Node NOT READY ({s['nodes_not_ready']})")
-    if s.get("pods_crashloop",0) > 0:
+    if s.get("pods_crashloop", 0) > 0:
         reasons.append(f"CrashLoopBackOff ({s['pods_crashloop']} pods)")
-    if s.get("pods_oom",0) > 0:
+    if s.get("pods_oom", 0) > 0:
         reasons.append(f"OOMKilled ({s['pods_oom']} pods)")
-    if s.get("pvcs_lost",0) > 0:
+    if s.get("pvcs_lost", 0) > 0:
         reasons.append(f"PVC LOST ({s['pvcs_lost']})")
-    if s.get("jobs_failed",0) > 0:
+    if s.get("pvcs_pending_alert", 0) > 0:
+        reasons.append(f"PVC PENDING prolongado ({s['pvcs_pending_alert']})")
+    if s.get("jobs_failed", 0) > 0:
         reasons.append(f"Job falhou ({s['jobs_failed']})")
 
-    # Detecta novos problemas comparando com snapshot anterior
     if prev_summary:
-        new_failed = s.get("pods_failed",0) - prev_summary.get("pods_failed",0)
-        new_pending = s.get("pods_pending",0) - prev_summary.get("pods_pending",0)
+        new_failed = s.get("pods_failed", 0) - prev_summary.get("pods_failed", 0)
+        new_pending = s.get("pods_pending", 0) - prev_summary.get("pods_pending", 0)
         if new_failed > 0:
             reasons.append(f"+{new_failed} pod(s) novos em FAILED")
         if new_pending > 3:
             reasons.append(f"+{new_pending} pod(s) novos em PENDING")
+        # Health degradou muito
+        prev_score = prev_summary.get("health_score", 100)
+        curr_score = s.get("health_score", 100)
+        if prev_score - curr_score >= 5:
+            reasons.append(f"Health degradou {prev_score - curr_score:.1f}% ({prev_score}% → {curr_score}%)")
 
     return len(reasons) > 0, reasons
