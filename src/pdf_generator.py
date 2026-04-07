@@ -380,18 +380,20 @@ def _pg_exec(report, st, delta, history=None):
         (str(s['warning_events']), 'Warnings',
          C_CRIT if s['warning_events']>10 else (C_WARN if s['warning_events']>0 else C_OK), None),
     ]
-    gauge_tbl_content = [_health_gauge(s.get('health_score',100),
+    _gauge_drawing = _health_gauge(s.get('health_score',100),
                         trend=s.get('health_trend'),
                         delta=s.get('health_delta'),
-                        w=gauge_w-8, h=75)]
-    # Sparkline do histórico
+                        w=gauge_w-8, h=75)
+    _spark_drawing = None
     if history and len(history) >= 2:
-        spark = _sparkline(history, w=gauge_w-16, h=22)
-        if spark:
-            gauge_tbl_content.append(spark)
+        _spark_drawing = _sparkline(history, w=gauge_w-16, h=22)
+
+    _gauge_rows = [[_gauge_drawing]]
+    if _spark_drawing:
+        _gauge_rows.append([_spark_drawing])
 
     gauge_tbl = Table(
-        [gauge_tbl_content],
+        _gauge_rows,
         colWidths=[gauge_w],
         style=TableStyle([('BACKGROUND',(0,0),(-1,-1),C_BGL),
                           ('BOX',(0,0),(-1,-1),0.5,C_A),
