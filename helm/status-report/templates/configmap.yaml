@@ -15,6 +15,7 @@ metadata:
 data:
   # Clusters e contextos
   K8S_CLUSTERS:  {{ .Values.config.clusters | quote }}
+  K8S_CLUSTER_NAME: {{ .Values.config.clusterName | default "" | quote }}
   K8S_CONTEXTS:  {{ .Values.config.contexts | quote }}
 
   # Diretórios

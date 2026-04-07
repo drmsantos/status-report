@@ -41,7 +41,8 @@ config:
   # Um ou mais clusters separados por vírgula
   # O pod usa o kubeconfig montado via ServiceAccount + in-cluster config
   # Para múltiplos clusters externos, use extraVolumes + KUBECONFIG env
-  clusters: "default"
+  clusters: ""
+  clusterName: ""   # nome exibido no relatório (auto-discovery)
   contexts: ""
 
   # Modo watch (se true, ignora o CronJob e roda o watch em loop no pod)
