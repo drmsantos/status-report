@@ -22,7 +22,7 @@ from pathlib import Path
 from collector import collect_all
 from pdf_generator import generate_pdf
 from notifications import load_config, send_email, send_teams, send_slack, should_alert
-from cache import save_snapshot, load_previous, diff_summary
+from cache import save_snapshot, load_previous, load_history, diff_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -174,7 +174,8 @@ def run_once(args, cfg, output_dir: Path) -> list[Path]:
             pdf_path = output_dir / f"k8s_status_{safe_name}_{ts}.pdf"
 
         try:
-            generate_pdf(report, str(pdf_path), delta=delta)
+            history = load_history(cluster_name)
+            generate_pdf(report, str(pdf_path), delta=delta, history=history)
             size_kb = pdf_path.stat().st_size / 1024
             logger.info(f"[{cluster_name}] PDF: {pdf_path} ({size_kb:.0f} KB)")
             generated_pdfs.append(pdf_path)

@@ -677,7 +677,14 @@ def build_summary(report: ClusterReport, previous=None) -> dict:
 
     warning_events = len([e for e in report.events if e.type == "Warning"])
 
-    pods_with_metrics = [p for p in pods if p.cpu_millicores > 0 or p.mem_mib > 0]
+    # Exclui namespaces internos do top pods
+    EXCLUDE_TOP_NS = {"status-report"} | set(
+        n.strip() for n in os.getenv("EXCLUDE_NAMESPACES", "").split(",") if n.strip()
+    )
+    pods_with_metrics = [
+        p for p in pods
+        if (p.cpu_millicores > 0 or p.mem_mib > 0) and p.namespace not in EXCLUDE_TOP_NS
+    ]
     top_cpu = sorted(pods_with_metrics, key=lambda p: p.cpu_millicores, reverse=True)[:10]
     top_mem = sorted(pods_with_metrics, key=lambda p: p.mem_mib, reverse=True)[:10]
 

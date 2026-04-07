@@ -284,7 +284,34 @@ def _alert_row(sev, msg, col, col2):
 # ════════════════════════════════════════════════════════════════════════════════
 # PÁGINA 1 — EXECUTIVO (layout limpo: sem workloads, pods atenção compacto)
 # ════════════════════════════════════════════════════════════════════════════════
-def _pg_exec(report, st, delta):
+def _sparkline(history, w=110, h=28):
+    """Mini gráfico de linha com os últimos N health scores."""
+    scores = [s.summary.get('health_score', 0) for s in history if s.summary]
+    if len(scores) < 2:
+        return None
+    d = Drawing(w, h)
+    n = len(scores)
+    x_step = (w - 10) / max(n - 1, 1)
+    min_s = min(scores)
+    max_s = max(scores)
+    rng = max(max_s - min_s, 1)
+    pts = [(5 + i * x_step, 4 + ((s - min_s) / rng) * (h - 8)) for i, s in enumerate(scores)]
+    # Linha
+    for i in range(len(pts) - 1):
+        x1, y1 = pts[i]
+        x2, y2 = pts[i + 1]
+        d.add(Line(x1, y1, x2, y2, strokeColor=C_A, strokeWidth=1.2))
+    # Pontos
+    for x, y in pts:
+        d.add(Rect(x-2, y-2, 4, 4, fillColor=C_A, strokeColor=None))
+    # Último ponto destacado
+    lx, ly = pts[-1]
+    c = C_OK if scores[-1] >= 85 else (C_WARN if scores[-1] >= 60 else C_CRIT)
+    d.add(Rect(lx-3, ly-3, 6, 6, fillColor=c, strokeColor=None))
+    return d
+
+
+def _pg_exec(report, st, delta, history=None):
     story = []
     s = report.summary
 
@@ -353,11 +380,18 @@ def _pg_exec(report, st, delta):
         (str(s['warning_events']), 'Warnings',
          C_CRIT if s['warning_events']>10 else (C_WARN if s['warning_events']>0 else C_OK), None),
     ]
-    gauge_tbl = Table(
-        [[_health_gauge(s.get('health_score',100),
+    gauge_tbl_content = [_health_gauge(s.get('health_score',100),
                         trend=s.get('health_trend'),
                         delta=s.get('health_delta'),
-                        w=gauge_w-8, h=75)]],
+                        w=gauge_w-8, h=75)]
+    # Sparkline do histórico
+    if history and len(history) >= 2:
+        spark = _sparkline(history, w=gauge_w-16, h=22)
+        if spark:
+            gauge_tbl_content.append(spark)
+
+    gauge_tbl = Table(
+        [gauge_tbl_content],
         colWidths=[gauge_w],
         style=TableStyle([('BACKGROUND',(0,0),(-1,-1),C_BGL),
                           ('BOX',(0,0),(-1,-1),0.5,C_A),
@@ -925,9 +959,13 @@ def _pg_net_stor(report, st):
 
     story.append(_sec_hdr('PersistentVolumeClaims'))
     story.append(Spacer(1, 4))
+    # Filtra PVCs internos do status-report
+    EXCLUDE_PVC_NS = {"status-report"}
+    pvcs_display = [p for p in report.pvcs if p.namespace not in EXCLUDE_PVC_NS]
+
     hd = ['PVC','Namespace','Status','Volume','Cap.','StorageClass','Modo','Idade']
     data = [hd]
-    for p in report.pvcs:
+    for p in pvcs_display:
         # Destaca Pending prolongado
         age_days = getattr(p, 'age_days', 0)
         from collector import PVC_PENDING_ALERT_DAYS
@@ -1064,10 +1102,10 @@ class _Doc(SimpleDocTemplate):
 # ════════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ════════════════════════════════════════════════════════════════════════════════
-def generate_pdf(report, output_path, delta=None):
+def generate_pdf(report, output_path, delta=None, history=None):
     st = _st()
     story = []
-    story.extend(_pg_exec(report, st, delta or {}))
+    story.extend(_pg_exec(report, st, delta or {}, history or []))
     story.extend(_pg_resources(report, st))
     story.extend(_pg_nodes(report, st))
     story.extend(_pg_workloads(report, st))
