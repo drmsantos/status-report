@@ -17,6 +17,7 @@ import os
 import json
 import smtplib
 import ssl
+import base64
 import logging
 import requests
 from email.mime.multipart import MIMEMultipart
@@ -300,43 +301,126 @@ def _is_power_automate(url: str) -> bool:
     ])
 
 
-def _teams_pa_payload(report: ClusterReport) -> dict:
-    """Payload simples para Power Automate — campos nomeados, fácil de usar no fluxo."""
+def _teams_pa_payload(report: ClusterReport, pdf_path: str = "") -> dict:
+    """Payload rico para Power Automate — inclui HTML do card + PDF base64."""
     s = report.summary
     health = s.get("health_score", 100)
     trend_s = _trend_str(s)
     has_crit = (s.get("nodes_not_ready", 0) > 0
                 or s.get("pods_crashloop", 0) > 0
                 or s.get("pvcs_pending_alert", 0) > 0)
+    status = "CRITICO" if has_crit else ("ATENCAO" if health < 85 else "OK")
+    status_color = "#C0392B" if has_crit else ("#F39C12" if health < 85 else "#27AE60")
+    health_color = "#E74C3C" if health < 60 else ("#F39C12" if health < 85 else "#27AE60")
 
     pvc_list = s.get("pvcs_pending_alert_list", [])
     pvc_names = ", ".join(f"{p['ns']}/{p['name']}" for p in pvc_list[:3])
 
+    # Alertas para o card
+    alerts = []
+    if s.get("pods_crashloop", 0):
+        alerts.append(f"🔴 {s['pods_crashloop']} Pod(s) em CrashLoopBackOff")
+    if s.get("pvcs_pending_alert", 0):
+        alerts.append(f"🔴 {s['pvcs_pending_alert']} PVC(s) PENDING: {pvc_names}")
+    if s.get("pods_failed", 0):
+        alerts.append(f"⚠️ {s['pods_failed']} Pod(s) FAILED")
+    if s.get("deployments_degraded", 0):
+        alerts.append(f"⚠️ {s['deployments_degraded']} Deployment(s) degradado(s)")
+    if s.get("pods_high_restarts", 0):
+        alerts.append(f"⚠️ {s['pods_high_restarts']} Pod(s) com restarts elevados")
+    alerts_html = "".join(f"<li>{a}</li>" for a in alerts) if alerts else "<li>Nenhum alerta</li>"
+
+    # KPIs
+    kpis = [
+        (f"{s.get('nodes_ready',0)}/{s.get('total_nodes',0)}", "Nodes Ready"),
+        (str(s.get("pods_running", 0)),  "Running"),
+        (str(s.get("pods_failed", 0)),   "Failed"),
+        (str(s.get("pods_pending", 0)),  "Pending"),
+        (f"{s.get('deployments_ok',0)}/{s.get('total_deployments',0)}", "Deploys OK"),
+        (str(s.get("warning_events", 0)), "Warnings"),
+    ]
+    kpis_html = "".join(
+        f'''<td style="text-align:center;padding:8px 12px;border-right:1px solid #e0e0e0">
+            <div style="font-size:18px;font-weight:600;color:#1a1a2e">{v}</div>
+            <div style="font-size:11px;color:#666;margin-top:2px">{l}</div>
+        </td>''' for v, l in kpis
+    )
+
+    html_card = f"""<html><body style="margin:0;padding:0;font-family:Arial,sans-serif;background:#f4f7f8">
+<table width="600" cellpadding="0" cellspacing="0" style="margin:0 auto;background:#fff;border-radius:8px;overflow:hidden">
+  <tr><td style="background:#1a1a2e;padding:16px 20px">
+    <span style="color:#fff;font-size:16px;font-weight:600">&#9881; Kubernetes Status Report v2</span><br>
+    <span style="color:#aab;font-size:12px">Cluster: {report.cluster_name} &nbsp;|&nbsp; {report.collected_at}</span>
+  </td></tr>
+  <tr><td style="background:{status_color};padding:10px 20px;color:#fff;font-weight:600;font-size:13px">
+    — {status} — {"Falhas detectadas" if has_crit else ("Atenção necessária" if health < 85 else "Tudo operacional")}
+  </td></tr>
+  <tr><td style="padding:16px 20px">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td width="100" style="vertical-align:middle">
+          <div style="font-size:36px;font-weight:700;color:{health_color}">{health}%</div>
+          <div style="font-size:11px;color:#666">Health Score {trend_s or "→"}</div>
+        </td>
+        <td><table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e0e0e0;border-radius:6px;overflow:hidden">
+          <tr style="background:#f9f9f9">{kpis_html}</tr>
+        </table></td>
+      </tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:0 20px 16px">
+    <div style="background:#fff8f8;border-left:4px solid #C0392B;padding:10px 14px;border-radius:4px">
+      <div style="font-size:13px;font-weight:600;color:#C0392B;margin-bottom:6px">Alertas Ativos</div>
+      <ul style="margin:0;padding-left:18px;font-size:12px;color:#333">{alerts_html}</ul>
+    </div>
+  </td></tr>
+  <tr><td style="padding:10px 20px;border-top:1px solid #eee;font-size:11px;color:#999;text-align:center">
+    OpenLabs — DevOps | Infra &nbsp;|&nbsp; Relatório completo em PDF anexado.
+  </td></tr>
+</table></body></html>"""
+
+    # PDF em base64
+    pdf_b64 = ""
+    pdf_filename = ""
+    if pdf_path:
+        try:
+            import os
+            with open(pdf_path, "rb") as f:
+                pdf_b64 = base64.b64encode(f.read()).decode("utf-8")
+            pdf_filename = os.path.basename(pdf_path)
+        except Exception:
+            pass
+
     return {
-        "cluster":             report.cluster_name,
-        "collected_at":        report.collected_at,
-        "health_score":        f"{health}%",
-        "health_trend":        trend_s or "→",
-        "status":              "CRITICO" if has_crit else ("ATENCAO" if health < 85 else "OK"),
-        "nodes_ready":         f"{s.get('nodes_ready',0)}/{s.get('total_nodes',0)}",
-        "pods_running":        s.get("pods_running", 0),
-        "pods_failed":         s.get("pods_failed", 0),
-        "pods_pending":        s.get("pods_pending", 0),
-        "pods_crashloop":      s.get("pods_crashloop", 0),
+        "cluster":              report.cluster_name,
+        "collected_at":         report.collected_at,
+        "health_score":         f"{health}%",
+        "health_trend":         trend_s or "→",
+        "status":               status,
+        "status_color":         status_color,
+        "nodes_ready":          f"{s.get('nodes_ready',0)}/{s.get('total_nodes',0)}",
+        "pods_running":         s.get("pods_running", 0),
+        "pods_failed":          s.get("pods_failed", 0),
+        "pods_pending":         s.get("pods_pending", 0),
+        "pods_crashloop":       s.get("pods_crashloop", 0),
         "deployments_degraded": s.get("deployments_degraded", 0),
-        "warning_events":      s.get("warning_events", 0),
-        "pvcs_pending":        s.get("pvcs_pending_alert", 0),
-        "pvcs_pending_list":   pvc_names,
-        "pvcs_lost":           s.get("pvcs_lost", 0),
+        "warning_events":       s.get("warning_events", 0),
+        "pvcs_pending":         s.get("pvcs_pending_alert", 0),
+        "pvcs_pending_list":    pvc_names,
+        "pvcs_lost":            s.get("pvcs_lost", 0),
+        "alerts":               alerts,
+        "html_card":            html_card,
+        "pdf_base64":           pdf_b64,
+        "pdf_filename":         pdf_filename,
     }
 
 
-def send_teams(report: ClusterReport, webhook_url: str) -> bool:
+def send_teams(report: ClusterReport, webhook_url: str, pdf_path: str = "") -> bool:
     if not webhook_url:
         return False
     try:
         if _is_power_automate(webhook_url):
-            payload = _teams_pa_payload(report)
+            payload = _teams_pa_payload(report, pdf_path=pdf_path)
             logger.debug("Teams: usando payload Power Automate")
         else:
             payload = _teams_card(report)

@@ -205,7 +205,7 @@ def run_once(args, cfg, output_dir: Path) -> list[Path]:
             send_email(report, str(pdf_path), cfg, delta=delta)
 
         if cfg.teams_webhook:
-            send_teams(report, cfg.teams_webhook)
+            send_teams(report, cfg.teams_webhook, pdf_path=str(pdf_path))
 
         if cfg.slack_webhook:
             send_slack(report, cfg.slack_webhook, cfg.slack_channel)
