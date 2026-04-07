@@ -893,16 +893,15 @@ def _pg_net_stor(report, st):
     if report.ingresses:
         left.append(_sec_hdr('Ingresses', col2))
         left.append(Spacer(1, 3))
-        hi = ['Ingress','Namespace','Hosts','Address','Ports','Idade']
+        hi = ['Ingress','Namespace','Hosts','Ports','Idade']
         di = [hi]
         for i in report.ingresses:
-            di.append([Paragraph(i.name[:18], st['td_b']),
-                       Paragraph(i.namespace[:10], st['td_g']),
-                       Paragraph(i.hosts[:20], st['td_g']),
-                       Paragraph(i.address[:14].rstrip(','), st['td_g']),
-                       Paragraph(i.ports[:14], st['td_c']),
+            di.append([Paragraph(i.name[:20], st['td_b']),
+                       Paragraph(i.namespace[:12], st['td_g']),
+                       Paragraph(i.hosts[:38], st['td_g']),
+                       Paragraph(i.ports[:16], st['td_c']),
                        Paragraph(i.age, st['td_g'])])
-        wi = [r*col2 for r in [0.20,0.20,0.24,0.16,0.12,0.08]]
+        wi = [r*USE for r in [0.16,0.13,0.48,0.14,0.09]]
         ti = Table(di, colWidths=wi, repeatRows=1); ti.setStyle(_tbl_style())
         left.append(ti)
         left.append(Spacer(1,6))
