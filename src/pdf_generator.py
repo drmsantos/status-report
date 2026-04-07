@@ -463,11 +463,11 @@ def _pg_exec(report, st, delta):
         fw = max(0, (val/total)*bw2)
         row_d2 = Drawing(col2, 11)
         row_d2.add(String(0, 2, lbl, fontSize=6.5, fontName=N, fillColor=_hx(C_DARK)))
-        row_d2.add(Rect(55, 2, bw2, 7, fillColor=C_BGL2, strokeColor=None, rx=2))
+        row_d2.add(Rect(62, 2, bw2, 7, fillColor=C_BGL2, strokeColor=None, rx=2))
         if fw > 0:
-            row_d2.add(Rect(55, 2, fw, 7, fillColor=colors.HexColor(hx),
+            row_d2.add(Rect(62, 2, fw, 7, fillColor=colors.HexColor(hx),
                             strokeColor=None, rx=2))
-        row_d2.add(String(55+bw2+5, 2, str(val), fontSize=6.5, fontName=B,
+        row_d2.add(String(62+bw2+5, 2, str(val), fontSize=6.5, fontName=B,
                           fillColor=_hx(C_DARK)))
         ps_block.append(row_d2)
 
@@ -773,7 +773,7 @@ def _pg_workloads(report, st):
         hc = ['CronJob','Namespace','Schedule','Ultimo','Idade']
         dc = [hc]
         for cj in report.cronjobs:
-            dc.append([Paragraph(cj.name[:28], st['td_b']),
+            dc.append([Paragraph(cj.name[:24], st['td_b']),
                        Paragraph(cj.namespace[:20], st['td_g']),
                        Paragraph(cj.schedule, st['td_g']),
                        Paragraph(cj.last_schedule, st['td_g']),
@@ -837,7 +837,7 @@ def _pg_pods(report, st):
                      Paragraph(p.mem_usage, st['td_c']),
                      Paragraph(p.node[:14] if p.node else '?', st['td_g']),
                      Paragraph(p.age, st['td_g'])])
-    ws = [r*USE for r in [0.22,0.13,0.14,0.06,0.07,0.07,0.07,0.14,0.06]]
+    ws = [r*USE for r in [0.21,0.12,0.16,0.06,0.07,0.07,0.07,0.14,0.06]]
     t = Table(data, colWidths=ws, repeatRows=1)
     t.setStyle(_tbl_style())
     story.append(t)
@@ -918,7 +918,7 @@ def _pg_net_stor(report, st):
                        Paragraph(sv.external_ip[:12], st['td_g']),
                        Paragraph(sv.ports[:24], st['td_g']),
                        Paragraph(sv.age, st['td_g'])])
-        ws2 = [r*col2 for r in [0.20,0.14,0.16,0.14,0.26,0.10]]
+        ws2 = [r*col2 for r in [0.20,0.14,0.18,0.13,0.25,0.10]]
         ts = Table(ds, colWidths=ws2, repeatRows=1); ts.setStyle(_tbl_style())
         right.append(ts)
 
