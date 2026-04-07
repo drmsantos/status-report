@@ -774,7 +774,7 @@ def _pg_workloads(report, st):
         dc = [hc]
         for cj in report.cronjobs:
             dc.append([Paragraph(cj.name[:24], st['td_b']),
-                       Paragraph(cj.namespace[:20], st['td_g']),
+                       Paragraph(cj.namespace[:14], st['td_g']),
                        Paragraph(cj.schedule, st['td_g']),
                        Paragraph(cj.last_schedule, st['td_g']),
                        Paragraph(cj.age, st['td_g'])])
@@ -828,7 +828,7 @@ def _pg_pods(report, st):
     hd = ['Pod','Namespace','Status','Ready','Restarts','CPU','Mem','Node','Idade']
     data = [hd]
     for p in problem:
-        data.append([Paragraph(p.name[:32], st['td_b']),
+        data.append([Paragraph(p.name[:28], st['td_b']),
                      Paragraph(p.namespace, st['td_g']),
                      _status_cell(p.status, st),
                      Paragraph(p.ready, st['td_c']),
@@ -913,7 +913,7 @@ def _pg_net_stor(report, st):
         ds = [hs2]
         for sv in report.services:
             ds.append([Paragraph(sv.name[:20], st['td_b']),
-                       Paragraph(sv.namespace[:10], st['td_g']),
+                       Paragraph(sv.namespace[:8], st['td_g']),
                        Paragraph(sv.type, st['td_g']),
                        Paragraph(sv.external_ip[:12], st['td_g']),
                        Paragraph(sv.ports[:24], st['td_g']),
