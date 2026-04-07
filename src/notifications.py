@@ -3,7 +3,7 @@
 # Autor:   Diego Regis M. F. dos Santos
 # Email:   diego-f-santos@openlabs.com.br
 # Time:    OpenLabs - DevOps | Infra
-# Versão:  2.1.0
+# Versão:  2.2.0
 # Arquivo: notifications.py
 # Desc:    Envio de notificações — E-mail (O365), Teams Webhook, Slack Webhook
 # Changelog v2.1.0:
@@ -293,11 +293,54 @@ def _teams_card(report: ClusterReport) -> dict:
     }
 
 
+def _is_power_automate(url: str) -> bool:
+    """Detecta se a URL é do Power Automate (não connector nativo do Teams)."""
+    return any(x in url for x in [
+        "powerautomate", "powerplatform", "logic.azure.com"
+    ])
+
+
+def _teams_pa_payload(report: ClusterReport) -> dict:
+    """Payload simples para Power Automate — campos nomeados, fácil de usar no fluxo."""
+    s = report.summary
+    health = s.get("health_score", 100)
+    trend_s = _trend_str(s)
+    has_crit = (s.get("nodes_not_ready", 0) > 0
+                or s.get("pods_crashloop", 0) > 0
+                or s.get("pvcs_pending_alert", 0) > 0)
+
+    pvc_list = s.get("pvcs_pending_alert_list", [])
+    pvc_names = ", ".join(f"{p['ns']}/{p['name']}" for p in pvc_list[:3])
+
+    return {
+        "cluster":             report.cluster_name,
+        "collected_at":        report.collected_at,
+        "health_score":        f"{health}%",
+        "health_trend":        trend_s or "→",
+        "status":              "CRITICO" if has_crit else ("ATENCAO" if health < 85 else "OK"),
+        "nodes_ready":         f"{s.get('nodes_ready',0)}/{s.get('total_nodes',0)}",
+        "pods_running":        s.get("pods_running", 0),
+        "pods_failed":         s.get("pods_failed", 0),
+        "pods_pending":        s.get("pods_pending", 0),
+        "pods_crashloop":      s.get("pods_crashloop", 0),
+        "deployments_degraded": s.get("deployments_degraded", 0),
+        "warning_events":      s.get("warning_events", 0),
+        "pvcs_pending":        s.get("pvcs_pending_alert", 0),
+        "pvcs_pending_list":   pvc_names,
+        "pvcs_lost":           s.get("pvcs_lost", 0),
+    }
+
+
 def send_teams(report: ClusterReport, webhook_url: str) -> bool:
     if not webhook_url:
         return False
     try:
-        payload = _teams_card(report)
+        if _is_power_automate(webhook_url):
+            payload = _teams_pa_payload(report)
+            logger.debug("Teams: usando payload Power Automate")
+        else:
+            payload = _teams_card(report)
+            logger.debug("Teams: usando Adaptive Card (connector nativo)")
         r = requests.post(webhook_url, json=payload, timeout=15)
         if r.status_code in (200, 202):
             logger.info("Teams: notificação enviada")
