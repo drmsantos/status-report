@@ -3,11 +3,13 @@
 # Autor:   Diego Regis M. F. dos Santos
 # Email:   diego-f-santos@openlabs.com.br
 # Time:    OpenLabs - DevOps | Infra
-# Versão:  2.1.0
+# Versão:  2.2.0
 # Arquivo: main.py
 # Desc:    Entrypoint v2 — Multi-cluster, Watch mode, Cache histórico
 # Changelog v2.1.0:
 #   - previous_summary passado para collect_all para health trend
+# Changelog v2.2.0:
+#   - auto-discovery via discover.py (substitui _parse_clusters)
 #   - PVC Pending alert integrado no fluxo de notificações
 # =============================================================================
 
@@ -20,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from collector import collect_all
+from discover import discover_clusters, ClusterInfo
 from pdf_generator import generate_pdf
 from notifications import load_config, send_email, send_teams, send_slack, should_alert
 from cache import save_snapshot, load_previous, load_history, diff_summary
@@ -122,7 +125,8 @@ def _parse_clusters(args) -> list[tuple[str, str | None]]:
 
 
 def run_once(args, cfg, output_dir: Path) -> list[Path]:
-    clusters = _parse_clusters(args)
+    discovered = discover_clusters()
+    clusters = [(c.name, c.context) for c in discovered if c.reachable]
     generated_pdfs = []
 
     for cluster_name, context in clusters:
