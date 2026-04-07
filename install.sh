@@ -331,7 +331,7 @@ ok "Values gerado: $VALUES_FILE"
 helm upgrade --install "$RELEASE" "$CHART_DIR" \
     -n "$NAMESPACE" \
     -f "$VALUES_FILE" \
-    --wait --timeout 120s
+
 ok "Helm: $RELEASE instalado"
 
 # ── Validação ─────────────────────────────────────────────────────────────────
