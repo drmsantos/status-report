@@ -32,6 +32,11 @@ LABEL org.opencontainers.image.description="Kubernetes Status Report — OpenLab
 LABEL org.opencontainers.image.authors="diego-f-santos@openlabs.com.br"
 LABEL org.opencontainers.image.source="https://github.com/drmsantos/status-report"
 
+# Fontes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-crosextra-carlito \
+    && rm -rf /var/lib/apt/lists/*
+
 # kubectl
 COPY --from=kubectl-dl /tmp/kubectl /usr/local/bin/kubectl
 
