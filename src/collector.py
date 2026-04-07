@@ -140,6 +140,16 @@ def _fmt_roles(roles_str: str) -> str:
         return 1
 
 
+def _cpu_allocatable_m(cpu_str: str) -> int:
+    """Converte CPU allocatable para millicores."""
+    try:
+        if cpu_str.endswith("m"):
+            return int(cpu_str[:-1])
+        return int(float(cpu_str) * 1000)
+    except Exception:
+        return 1
+
+
 def _parse_top_nodes(output: str) -> dict[str, dict]:
     """Parseia saída de kubectl top nodes."""
     result = {}
