@@ -13,7 +13,7 @@ description: >
   e envia por e-mail (Office 365), Teams e Slack via CronJob nativo.
 type: application
 version: 2.0.0
-appVersion: "2.0.0"
+appVersion: "edge"
 
 keywords:
   - kubernetes

@@ -81,6 +81,36 @@ fi
 SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || echo "?")
 ok "API server: $SERVER"
 
+# ── imagePullSecret ──────────────────────────────────────────────────────────
+step "Registro de imagens (ghcr.io)"
+
+EXISTING_PULL_SECRETS=$(kubectl get secret --all-namespaces     --field-selector type=kubernetes.io/dockerconfigjson     --no-headers 2>/dev/null | awk '{print "    " $1 "/" $2}')
+
+if [[ -n "$EXISTING_PULL_SECRETS" ]]; then
+    echo "  Secrets docker encontrados no cluster:"
+    echo "$EXISTING_PULL_SECRETS"
+    ask "Nome do imagePullSecret para ghcr.io (Enter para criar novo): "
+    read -r PULL_SECRET_NAME
+    PULL_SECRET_NS=$(kubectl get secret --all-namespaces         --field-selector type=kubernetes.io/dockerconfigjson         --no-headers 2>/dev/null | grep "$PULL_SECRET_NAME" | awk '{print $1}' | head -1)
+else
+    PULL_SECRET_NAME=""
+    PULL_SECRET_NS=""
+fi
+
+if [[ -z "$PULL_SECRET_NAME" ]]; then
+    ask "GitHub Container Registry token (PAT com read:packages): "
+    read -rs GHCR_TOKEN; echo ""
+    ask "GitHub username: "
+    read -r GHCR_USER
+    PULL_SECRET_NAME="ghcr-pull-secret"
+    PULL_SECRET_NS=""
+    CREATE_PULL_SECRET="true"
+    ok "Pull secret será criado: $PULL_SECRET_NAME"
+else
+    CREATE_PULL_SECRET="false"
+    ok "Pull secret existente: $PULL_SECRET_NS/$PULL_SECRET_NAME"
+fi
+
 # ── Identidade do cliente ─────────────────────────────────────────────────────
 step "Identidade do cliente"
 
@@ -232,6 +262,22 @@ YAML
 )
 fi
 
+# imagePullSecret — copia de outro namespace ou cria novo
+if [[ "$CREATE_PULL_SECRET" == "true" ]]; then
+    kubectl create secret docker-registry "$PULL_SECRET_NAME" \
+        --docker-server=ghcr.io \
+        --docker-username="$GHCR_USER" \
+        --docker-password="$GHCR_TOKEN" \
+        -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+    ok "Pull secret criado: $PULL_SECRET_NAME"
+elif [[ -n "$PULL_SECRET_NS" && "$PULL_SECRET_NS" != "$NAMESPACE" ]]; then
+    kubectl get secret "$PULL_SECRET_NAME" -n "$PULL_SECRET_NS" \
+        -o yaml | \
+        sed "s/namespace: $PULL_SECRET_NS/namespace: $NAMESPACE/" | \
+        kubectl apply -f -
+    ok "Pull secret copiado de $PULL_SECRET_NS"
+fi
+
 # Gera values-<cliente>.yaml
 VALUES_FILE="$VALUES_DIR/values-${CLIENT_NAME}.yaml"
 cat > "$VALUES_FILE" << YAML
@@ -248,6 +294,9 @@ image:
   repository: ghcr.io/drmsantos/status-report
   tag: ""
   pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: ${PULL_SECRET_NAME}
 
 cronjob:
   schedule: "${SCHEDULE}"
