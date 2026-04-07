@@ -361,7 +361,7 @@ def _pg_exec(report, st, delta):
     col6 = (USE-162-12)/6
     kpi1 = _kpi_row([
         (f"{s['nodes_ready']}/{s['total_nodes']}", 'Nodes Ready',
-         C_OK if s['nodes_not_ready']==0 else C_CRIT, _dv('nodes_ready'), False, 'control+workers'),
+         C_OK if s['nodes_not_ready']==0 else C_CRIT, _dv('nodes_ready'), False, None),
         (str(s['total_pods']),         'Pods Total',        C_P,    _dv('total_pods'),    False, None),
         (str(s['pods_running']),       'Running',           C_OK,   _dv('pods_running'),  False, 'pods OK'),
         (str(s['pods_failed']),        'Failed/Crash',      C_CRIT if s['pods_failed']>0 else C_OK,
@@ -586,7 +586,7 @@ def _pg_resources(report, st):
     story.extend(_sec('Top Pods por Consumo de Recurso', st))
     top_cpu = s.get('top_cpu_pods', [])
     top_mem = s.get('top_mem_pods', [])
-    bar_data = [(f"{p['ns'][:10]}/{p['name'][:18]}", p.get('cpu_m',0),
+    bar_data = [(f"{p['ns'][:8]}/{p['name'][:15]}", p.get('cpu_m',0),
                  next((x['mem_mib'] for x in top_mem if x['name']==p['name']),0))
                 for p in top_cpu[:8]]
     if bar_data:
@@ -715,10 +715,10 @@ def _pg_workloads(report, st):
         hc = ['CronJob','Namespace','Schedule','Ultimo','Idade']
         dc = [hc]
         for cj in report.cronjobs:
-            dc.append([Paragraph(cj.name[:26],st['td_b']),Paragraph(cj.namespace[:18],st['td_g']),
+            dc.append([Paragraph(cj.name[:30],st['td_b']),Paragraph(cj.namespace[:20],st['td_g']),
                        Paragraph(cj.schedule,st['td_g']),Paragraph(cj.last_schedule,st['td_g']),
                        Paragraph(cj.age,st['td_g'])])
-        wc = [r*col2 for r in [0.32,0.24,0.22,0.14,0.08]]
+        wc = [r*col2 for r in [0.36,0.22,0.22,0.12,0.08]]
         tc = Table(dc, colWidths=wc, repeatRows=1)
         tc.setStyle(_tbl_style())
         cj_s.append(tc)
@@ -729,9 +729,9 @@ def _pg_workloads(report, st):
         dj = [hj]
         for j in report.jobs:
             if j.namespace == 'status-report': continue
-            dj.append([Paragraph(j.name[:24],st['td_b']),Paragraph(j.namespace[:16],st['td_g']),
+            dj.append([Paragraph(j.name[:28],st['td_b']),Paragraph(j.namespace[:18],st['td_g']),
                        _status(j.status,st),Paragraph(j.duration,st['td_g']),Paragraph(j.age,st['td_g'])])
-        wj = [r*col2 for r in [0.32,0.22,0.16,0.18,0.10]]
+        wj = [r*col2 for r in [0.36,0.22,0.14,0.16,0.12]]
         tj = Table(dj, colWidths=wj, repeatRows=1)
         tj.setStyle(_tbl_style())
         job_s.append(tj)
@@ -822,7 +822,7 @@ def _pg_net_stor(report, st):
             di.append([Paragraph(i.name[:20],st['td_b']),Paragraph(i.namespace[:14],st['td_g']),
                        Paragraph(i.hosts[:28],st['td_g']),Paragraph(i.address[:16],st['td_g']),
                        Paragraph(i.ports,st['td_c']),Paragraph(i.age,st['td_g'])])
-        wi = [r*col2 for r in [0.20,0.18,0.30,0.18,0.08,0.06]]
+        wi = [r*col2 for r in [0.20,0.16,0.26,0.16,0.14,0.08]]
         ti = Table(di, colWidths=wi, repeatRows=1)
         ti.setStyle(_tbl_style())
         left_s.append(ti)
@@ -834,8 +834,8 @@ def _pg_net_stor(report, st):
         for sv in report.services:
             ds.append([Paragraph(sv.name[:20],st['td_b']),Paragraph(sv.namespace[:14],st['td_g']),
                        Paragraph(sv.type,st['td_g']),Paragraph(sv.external_ip[:14],st['td_g']),
-                       Paragraph(sv.ports[:22],st['td_g']),Paragraph(sv.age,st['td_g'])])
-        ws2 = [r*col2 for r in [0.22,0.18,0.12,0.16,0.24,0.08]]
+                       Paragraph(sv.ports[:26],st['td_g']),Paragraph(sv.age,st['td_g'])])
+        ws2 = [r*col2 for r in [0.20,0.16,0.12,0.14,0.28,0.10]]
         ts = Table(ds, colWidths=ws2, repeatRows=1)
         ts.setStyle(_tbl_style())
         right_s.append(ts)
