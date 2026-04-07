@@ -108,6 +108,7 @@ class PVCInfo:
     access_modes: str
     storage_class: str
     age: str
+    age_days: float = 0.0
 
 
 @dataclass
