@@ -778,7 +778,7 @@ def _pg_workloads(report, st):
                        Paragraph(cj.schedule, st['td_g']),
                        Paragraph(cj.last_schedule, st['td_g']),
                        Paragraph(cj.age, st['td_g'])])
-        wc = [r*col2 for r in [0.34,0.22,0.22,0.14,0.08]]
+        wc = [r*col2 for r in [0.36,0.20,0.22,0.14,0.08]]
         tc2 = Table(dc, colWidths=wc, repeatRows=1); tc2.setStyle(_tbl_style())
         cj_s.append(tc2)
 
@@ -837,7 +837,7 @@ def _pg_pods(report, st):
                      Paragraph(p.mem_usage, st['td_c']),
                      Paragraph(p.node[:14] if p.node else '?', st['td_g']),
                      Paragraph(p.age, st['td_g'])])
-    ws = [r*USE for r in [0.23,0.13,0.11,0.06,0.07,0.07,0.07,0.16,0.06]]
+    ws = [r*USE for r in [0.22,0.13,0.14,0.06,0.07,0.07,0.07,0.14,0.06]]
     t = Table(data, colWidths=ws, repeatRows=1)
     t.setStyle(_tbl_style())
     story.append(t)
@@ -902,7 +902,7 @@ def _pg_net_stor(report, st):
                        Paragraph(i.address[:14], st['td_g']),
                        Paragraph(i.ports[:14], st['td_c']),
                        Paragraph(i.age, st['td_g'])])
-        wi = [r*col2 for r in [0.20,0.16,0.26,0.18,0.12,0.08]]
+        wi = [r*col2 for r in [0.20,0.20,0.24,0.16,0.12,0.08]]
         ti = Table(di, colWidths=wi, repeatRows=1); ti.setStyle(_tbl_style())
         left.append(ti)
 
@@ -918,7 +918,7 @@ def _pg_net_stor(report, st):
                        Paragraph(sv.external_ip[:12], st['td_g']),
                        Paragraph(sv.ports[:24], st['td_g']),
                        Paragraph(sv.age, st['td_g'])])
-        ws2 = [r*col2 for r in [0.20,0.16,0.12,0.14,0.28,0.10]]
+        ws2 = [r*col2 for r in [0.20,0.14,0.16,0.14,0.26,0.10]]
         ts = Table(ds, colWidths=ws2, repeatRows=1); ts.setStyle(_tbl_style())
         right.append(ts)
 
