@@ -434,7 +434,7 @@ def _pg_exec(report, st, delta):
     ns_block = [_sec_hdr('Top Namespaces por Pods', col2)]
     ns_block.append(Spacer(1, 3))
     max_pods = ns_active[0].pod_count if ns_active else 1
-    bar_w = col2 - 80
+    bar_w = col2 - 95
     for i, ns in enumerate(ns_active[:8]):
         c = colors.HexColor(NS_COLORS[i % len(NS_COLORS)])
         bw = max(2, (ns.pod_count / max_pods) * bar_w)
