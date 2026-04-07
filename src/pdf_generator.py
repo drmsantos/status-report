@@ -905,6 +905,7 @@ def _pg_net_stor(report, st):
         wi = [r*col2 for r in [0.20,0.20,0.24,0.16,0.12,0.08]]
         ti = Table(di, colWidths=wi, repeatRows=1); ti.setStyle(_tbl_style())
         left.append(ti)
+        left.append(Spacer(1,6))
 
     if report.services:
         right.append(_sec_hdr('Services Expostos', col2))
@@ -918,18 +919,17 @@ def _pg_net_stor(report, st):
                        Paragraph(sv.external_ip[:12], st['td_g']),
                        Paragraph(sv.ports[:24], st['td_g']),
                        Paragraph(sv.age, st['td_g'])])
-        ws2 = [r*col2 for r in [0.20,0.14,0.18,0.13,0.25,0.10]]
+        ws2 = [r*USE for r in [0.15,0.13,0.12,0.14,0.36,0.10]]
         ts = Table(ds, colWidths=ws2, repeatRows=1); ts.setStyle(_tbl_style())
         right.append(ts)
 
-    if left or right:
-        story.append(Table([[left or [Spacer(1,1)], right or [Spacer(1,1)]]],
-                           colWidths=[col2, col2],
-                           style=TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'),
-                                             ('LEFTPADDING',(0,0),(-1,-1),0),
-                                             ('RIGHTPADDING',(0,0),(0,0),8),
-                                             ('TOPPADDING',(0,0),(-1,-1),0),
-                                             ('BOTTOMPADDING',(0,0),(-1,-1),0)])))
+    if left:
+        for item in left:
+            story.append(item)
+        story.append(Spacer(1, 8))
+    if right:
+        for item in right:
+            story.append(item)
         story.append(Spacer(1, 8))
 
     if report.hpas:
