@@ -897,9 +897,9 @@ def _pg_net_stor(report, st):
         di = [hi]
         for i in report.ingresses:
             di.append([Paragraph(i.name[:18], st['td_b']),
-                       Paragraph(i.namespace[:12], st['td_g']),
-                       Paragraph(i.hosts[:22], st['td_g']),
-                       Paragraph(i.address[:14], st['td_g']),
+                       Paragraph(i.namespace[:10], st['td_g']),
+                       Paragraph(i.hosts[:20], st['td_g']),
+                       Paragraph(i.address[:14].rstrip(','), st['td_g']),
                        Paragraph(i.ports[:14], st['td_c']),
                        Paragraph(i.age, st['td_g'])])
         wi = [r*col2 for r in [0.20,0.20,0.24,0.16,0.12,0.08]]
@@ -913,13 +913,13 @@ def _pg_net_stor(report, st):
         hs2 = ['Service','Namespace','Tipo','External IP','Ports','Idade']
         ds = [hs2]
         for sv in report.services:
-            ds.append([Paragraph(sv.name[:18], st['td_b']),
-                       Paragraph(sv.namespace[:12], st['td_g']),
+            ds.append([Paragraph(sv.name[:20], st['td_b']),
+                       Paragraph(sv.namespace[:10], st['td_g']),
                        Paragraph(sv.type, st['td_g']),
                        Paragraph(sv.external_ip[:12], st['td_g']),
                        Paragraph(sv.ports[:24], st['td_g']),
                        Paragraph(sv.age, st['td_g'])])
-        ws2 = [r*USE for r in [0.15,0.13,0.12,0.14,0.36,0.10]]
+        ws2 = [r*USE for r in [0.16,0.11,0.12,0.14,0.37,0.10]]
         ts = Table(ds, colWidths=ws2, repeatRows=1); ts.setStyle(_tbl_style())
         right.append(ts)
 
