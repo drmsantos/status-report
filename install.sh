@@ -308,6 +308,7 @@ cronjob:
 
 config:
   clusters: ""          # vazio = auto-discovery via kubeconfig
+  clusterName: "${CLIENT_NAME}"
   contexts: ""
   outputDir: /data/reports
   cacheDir:  /data/cache
