@@ -384,6 +384,21 @@ helm upgrade --install "$RELEASE" "$CHART_DIR" \
 
 ok "Helm: $RELEASE instalado"
 
+# Garante que o PVC de cache existe (local-path só faz bind no primeiro job)
+if [[ -n "$SC" ]]; then
+    kubectl patch cronjob "$RELEASE" -n "$NAMESPACE"         --type=json -p="[{
+            \"op\": \"replace\",
+            \"path\": \"/spec/jobTemplate/spec/template/spec/volumes/1\",
+            \"value\": {
+                \"name\": \"cache\",
+                \"persistentVolumeClaim\": {
+                    \"claimName\": \"${RELEASE}-cache\"
+                }
+            }
+        }]" &>/dev/null || true
+    ok "PVC cache: ${RELEASE}-cache (bind no primeiro job)"
+fi
+
 # ── Validação ─────────────────────────────────────────────────────────────────
 step "Validação — disparando job de teste"
 
